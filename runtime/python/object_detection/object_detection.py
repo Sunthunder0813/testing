@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import argparse
 from pathlib import Path
+import cv2
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.tracker.byte_tracker import BYTETracker
 from common.hailo_inference import HailoInfer
@@ -168,17 +169,60 @@ def parse_args() -> argparse.Namespace:
 
 
 
+def init_dual_ip_camera_source(ip1, ip2, batch_size, camera_resolution):
+    """
+    Initialize two IP camera streams and yield merged frames.
+    """
+    cap1 = cv2.VideoCapture(f"rtsp://{ip1}/live")
+    cap2 = cv2.VideoCapture(f"rtsp://{ip2}/live")
+    if not cap1.isOpened() or not cap2.isOpened():
+        raise RuntimeError(f"Could not open IP cameras: {ip1}, {ip2}")
+
+    # Optionally set resolution
+    if camera_resolution:
+        res_map = {"sd": (640, 480), "hd": (1280, 720), "fhd": (1920, 1080)}
+        w, h = res_map.get(camera_resolution, (640, 480))
+        cap1.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        cap2.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+
+    def merged_frames():
+        while True:
+            ret1, frame1 = cap1.read()
+            ret2, frame2 = cap2.read()
+            if not ret1 or not ret2:
+                break
+            # Resize to same size if needed
+            if frame1.shape != frame2.shape:
+                h = min(frame1.shape[0], frame2.shape[0])
+                w = min(frame1.shape[1], frame2.shape[1])
+                frame1 = cv2.resize(frame1, (w, h))
+                frame2 = cv2.resize(frame2, (w, h))
+            merged = np.hstack((frame1, frame2))
+            yield [merged] * batch_size  # batch of merged frames
+
+    return None, merged_frames()
+
+
 def run_inference_pipeline(net, input, batch_size, labels, output_dir,
           save_stream_output=False, camera_resolution=None, output_resolution=None,
           enable_tracking=False, show_fps=False, framerate=None, draw_trail=False) -> None:
     """
     Initialize queues, HailoAsyncInference instance, and run the inference.
+
+    Special input: if input == "dual_ip", will use two hardcoded IP cameras and merge their streams.
     """
     labels = get_labels(labels)
     config_data = load_json_file("config.json")
 
-    # Initialize input source from string: "camera", video file, or image folder.
-    cap, images = init_input_source(input, batch_size, camera_resolution)
+    # --- Dual IP camera support ---
+    if input == "dual_ip":
+        ip1 = "192.168.18.2"
+        ip2 = "192.168.18.71"
+        cap, images = init_dual_ip_camera_source(ip1, ip2, batch_size, camera_resolution)
+    else:
+        cap, images = init_input_source(input, batch_size, camera_resolution)
     tracker = None
     fps_tracker = None
     if show_fps:
@@ -305,6 +349,9 @@ def inference_callback(
 def main() -> None:
     """
     Main function to run the script.
+
+    To use dual IP camera mode, run:
+        python object_detection.py --input dual_ip
     """
     args = parse_args()
 
