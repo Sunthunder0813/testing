@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+#python object_detection.py --input dual_ip --net <your_model>
+
+
 import argparse
 import os
 import sys
