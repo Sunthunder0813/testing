@@ -6,6 +6,7 @@ from loguru import logger
 import numpy as np
 import cv2
 from pathlib import Path
+import urllib.request
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.tracker.byte_tracker import BYTETracker
 from common.hailo_inference import HailoInfer
@@ -46,17 +47,33 @@ def preprocess_frame(frame, width, height):
     img = np.expand_dims(img, axis=0)
     return img
 
+def download_hef_model(url, dest_path):
+    if not os.path.isfile(dest_path):
+        logger.info(f"Downloading model from {url} to {dest_path} ...")
+        urllib.request.urlretrieve(url, dest_path)
+        logger.success(f"Downloaded model to {dest_path}")
+
 def main():
     # --- Hardcoded config ---
     ip1 = "192.168.18.2"
     ip2 = "192.168.18.71"
     camera_resolution = "hd"
-    net = "./your_model.hef"  # <-- Set your model path here
+    hef_url = "https://example.com/path/to/yolo8vn.hef"  # <-- Replace with actual URL
+    net = "./yolo8vn.hef"
     labels_path = str(Path(__file__).parent.parent / "common" / "coco.txt")
     config_data = load_json_file("config.json")
     labels = get_labels(labels_path)
     tracker = None
     draw_trail = False
+
+    # --- Download model if not exists ---
+    download_hef_model(hef_url, net)
+
+    # --- Check model file exists ---
+    if not os.path.isfile(net):
+        logger.error(f"Model file not found: {net}\n"
+                     f"Please provide a valid .hef model file path in the 'net' variable.")
+        sys.exit(1)
 
     # --- Init model ---
     hailo_inference = HailoInfer(net, batch_size=1)
