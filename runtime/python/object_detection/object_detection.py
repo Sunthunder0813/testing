@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "- A local HEF file path\n"
             "    → uses the specified HEF directly.\n"
-            "- A model name (e.g., yolov8n)\n"
+            "- A model name (se.g., yolov8n)\n"
             "    → automatically downloads & resolves the correct HEF for your device.\n"
             "      Use --list-nets to see the available nets."
         )    
