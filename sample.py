@@ -1,22 +1,20 @@
 import cv2
 import numpy as np
+import threading
+import time
 from hailo_platform import HEF, VDevice, InferVStreams
 
 # ---------------- CONFIG ----------------
-RTSP_URL = "rtsp://admin@192.168.18.2:554/stream1"
-LOCAL_ONNX_PATH = "/home/pi/hailo_models/yolov8n.onnx"  # <-- your local ONNX
-HEF_PATH = "/home/pi/hailo_models/yolov8n_person.hef"   # <-- after converting to HEF
+RTSP_URL = "rtsp://user:password@192.168.18.2:554/stream1"
+HEF_PATH = "yolov8n_person.hef"
 INPUT_SIZE = 640
 CONF_THRESH = 0.5
 # ----------------------------------------
 
-print(f"➡️ Using local ONNX: {LOCAL_ONNX_PATH}")
-print(f"➡️ Make sure HEF exists: {HEF_PATH}")
-
-# ---------------- GStreamer RTSP pipeline ----------------
+# GStreamer pipeline (LOW LATENCY, HIGH FPS)
 gst_pipeline = (
-    f"rtspsrc location={RTSP_URL} latency=200 ! "
-    "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! appsink"
+    f"rtspsrc location={RTSP_URL} latency=0 ! "
+    "decodebin ! videoconvert ! appsink"
 )
 
 cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
@@ -24,46 +22,62 @@ if not cap.isOpened():
     print("❌ Cannot open RTSP stream")
     exit(1)
 
-# ---------------- LOAD HEF ----------------
 hef = HEF(HEF_PATH)
 
 with VDevice() as device:
     network = device.configure(hef)[0]
     infer = InferVStreams(network)
 
-    print("✅ Hailo inference started")
+        frame_count = 0
+        start_time = time.time()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # Resize to model input
+        # Resize for model
         img = cv2.resize(frame, (INPUT_SIZE, INPUT_SIZE))
         img = np.expand_dims(img, axis=0)
 
-        # Hailo inference
+        # Inference
         outputs = infer.infer(img)
 
-        # ---------------- SIMPLE PERSON FILTER ----------------
-        # Adjust based on your HEF output format
+        # ---- SIMPLE YOLO PERSON FILTER ----
+        # NOTE: output parsing depends on model
+        # This is a simplified example structure
         detections = outputs[list(outputs.keys())[0]][0]
 
         for det in detections:
             x1, y1, x2, y2, score, cls = det
-            if int(cls) == 0 and score > CONF_THRESH:  # person class
+
+            if int(cls) == 0 and score > CONF_THRESH:  # person
                 h, w, _ = frame.shape
                 x1 = int(x1 * w)
                 x2 = int(x2 * w)
                 y1 = int(y1 * h)
                 y2 = int(y2 * h)
+
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, "Person", (x1, y1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, "Person",
+                            (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6, (0, 255, 0), 2)
 
         cv2.imshow("Hailo IP Camera - Person Detection", frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
+        if cv2.waitKey(1) & 0xFF == 27:
             break
 
-cap.release()
+    cap.release()
+    cv2.destroyWindow(window_name)
+
+threads = []
+for idx, url in enumerate(CAMERA_URLS):
+    t = threading.Thread(target=run_camera, args=(url, f"Camera {idx+1}"))
+    t.start()
+    threads.append(t)
+
+for t in threads:
+    t.join()
+
 cv2.destroyAllWindows()
