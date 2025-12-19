@@ -1,16 +1,1 @@
-set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ sudo dpkg -i hailort-pcie-driver_4.23.0_all.deb
-(Reading database ... 161967 files and directories currently installed.)
-Preparing to unpack hailort-pcie-driver_4.23.0_all.deb ...
-Could not test for SecureBoot, assuming SecureBoot is disabled on this machine.
-Unpacking hailort-pcie-driver (4.23.0) over (4.23.0) ...
-Setting up hailort-pcie-driver (4.23.0) ...
-
-WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
-
-build-essential/stable,now 12.12 arm64 [installed]
-Do you wish to use DKMS? [Y/n]: y
-Failed. Exited with status 2. See /var/log/hailort-pcie-driver.deb.log
-dpkg: error processing package hailort-pcie-driver (--install):
- installed hailort-pcie-driver package post-installation script subprocess returned error exit status 2
-Errors were encountered while processing:
- hailort-pcie-driver
+sudo apt install --reinstall raspberrypi-kernel=1:6.1.* raspberrypi-bootloader=1:6.1.*
