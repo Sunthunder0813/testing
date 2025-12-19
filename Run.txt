@@ -34,15 +34,26 @@ sudo apt install -y python3-numpy
 # chmod +x hailo-ai-sdk-<version>.run
 # ./hailo-ai-sdk-<version>.run
 
-# --- HAILO PYTHON PACKAGES ---
-# If you get "externally-managed-environment" errors, use a virtual environment:
-# python3 -m venv ~/hailo-venv
-# source ~/hailo-venv/bin/activate
-# pip install hailo_platform hailo_sdk
+# --- HAILO REQUIRED PACKAGES (install via SDK or individually if needed) ---
+# These are usually installed by the Hailo SDK .run installer, but you can install/update them manually:
+sudo apt install -y hailo-all
+sudo apt install -y hailo-platform
+sudo apt install -y hailo-pcie-driver
+sudo apt install -y hailo-rt
+sudo apt install -y hailo-apps
+sudo apt install -y hailo-demos
+sudo apt install -y hailo-tappas
+sudo apt install -y hailo-hailort
+sudo apt install -y hailo-hailortcli
 
-# Or, as a last resort (not recommended), use:
-# pip3 install --break-system-packages hailo_platform hailo_sdk
+# For Python API (if not using pip/venv):
+sudo apt install -y python3-hailo-platform python3-hailo-sdk
 
 # --- TEST GStreamer RTSP ---
 # Test RTSP stream before running Python code:
 # gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
+
+# --- RUN YOUR PYTHON SCRIPT ---
+# After completing all installations and verifying RTSP streams, run your detection script:
+# (Activate your virtual environment first if you used one)
+python3 sample.py
