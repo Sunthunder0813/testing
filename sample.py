@@ -28,13 +28,18 @@ class HailoTurboEngine:
         self.input_queue = Queue(maxsize=128)
         self.output_results = {}
         
-        # CORRECT WAY TO SET BATCH SIZE:
-        # We modify the network_params before calling self.device.configure
+        # CORRECTED CONFIGURATION ACCESS:
         configure_params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
         
-        # The network name is typically the first key in the params dictionary
-        network_name = list(configure_params.network_group_params.keys())[0]
-        configure_params.network_group_params[network_name].batch_size = BATCH_SIZE
+        # Get the network name from HEF and apply batch size
+        network_group_name = self.hef.get_network_group_names()[0]
+        
+        # Check if configure_params is a dict or an object with attributes
+        if hasattr(configure_params, 'network_group_params'):
+            configure_params.network_group_params[network_group_name].batch_size = BATCH_SIZE
+        else:
+            # For older/newer versions where it behaves purely as a dictionary
+            configure_params[network_group_name].batch_size = BATCH_SIZE
         
         self.network_group = self.device.configure(self.hef, configure_params)[0]
         
@@ -106,6 +111,8 @@ class CameraWorker:
 
     def _run(self):
         cap = cv2.VideoCapture(self.url)
+        # Pi 5 optimization: Set buffer to 1 to reduce lag
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         f_idx = 0
         while True:
             ret, frame = cap.read()
@@ -114,12 +121,12 @@ class CameraWorker:
                 cap.open(self.url)
                 continue
             
-            # Resize for NPU inside the camera thread to save time
+            # Pre-resize in worker thread
             resized = cv2.resize(frame, (self.engine.target_shape[1], self.engine.target_shape[0]))
             key = f"{self.name}_{f_idx}"
             self.engine.input_queue.put((key, resized))
 
-            # Look for results
+            # Fetch results
             if key in self.engine.output_results:
                 dets = self.engine.output_results.pop(key)
                 with self.lock:
@@ -131,7 +138,7 @@ class CameraWorker:
 
 # ================= MAIN =================
 def main():
-    print("💎 Pi 5 (Gen 3) + Hailo-8L: 240 FPS Async Mode")
+    print("💎 Pi 5 (Gen 3) + Hailo-8L: Industrial Turbo Mode")
     engine = HailoTurboEngine(HEF_MODEL)
     engine.start()
     
@@ -145,19 +152,22 @@ def main():
                 img = w.latest_frame.copy()
                 dets = w.latest_dets
             
-            # Draw detections
             fh, fw = img.shape[:2]
-            for d in dets:
-                if d[4] > 0.5:
-                    x1, y1, x2, y2 = int(d[1]*fw), int(d[0]*fh), int(d[3]*fw), int(d[2]*fh)
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 127), 2)
+            # Ensure dets is iterable
+            if dets is not None and len(dets) > 0:
+                for d in dets:
+                    # Robust check for detection array structure
+                    if len(d) >= 5 and d[4] > 0.45:
+                        x1, y1, x2, y2 = int(d[1]*fw), int(d[0]*fh), int(d[3]*fw), int(d[2]*fh)
+                        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 127), 2)
 
-            cv2.putText(img, f"{w.name} | NPU FPS: {engine.fps:.1f}", (20, 40), 
+            cv2.putText(img, f"{w.name} | Total NPU FPS: {engine.fps:.1f}", (20, 40), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             display_frames.append(cv2.resize(img, (854, 480)))
 
         if display_frames:
-            cv2.imshow("Hailo Turbo Dashboard", cv2.hconcat(display_frames))
+            combined = cv2.hconcat(display_frames) if len(display_frames) > 1 else display_frames[0]
+            cv2.imshow("Hailo Turbo Dashboard", combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
