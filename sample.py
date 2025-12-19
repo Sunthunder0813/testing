@@ -45,6 +45,8 @@ if not os.path.exists(HEF_MODEL):
 
 # Hailo setup
 HAILO_AVAILABLE = False
+infer = None
+network = None
 try:
     from hailo_platform import HEF, VDevice, InferVStreams
     HAILO_AVAILABLE = True
@@ -56,11 +58,11 @@ except ImportError:
 if HAILO_AVAILABLE:
     try:
         hef = HEF(HEF_MODEL)
-        with VDevice() as device:
-            network = device.configure(hef)[0]
-            input_vstreams_params = network.create_input_vstream_params()
-            output_vstreams_params = network.create_output_vstream_params()
-            infer = InferVStreams(network, input_vstreams_params, output_vstreams_params)
+        device = VDevice()
+        network = device.configure(hef)[0]
+        input_vstreams_params = network.create_input_vstream_params()
+        output_vstreams_params = network.create_output_vstream_params()
+        infer = InferVStreams(network, input_vstreams_params, output_vstreams_params)
         print("✅ HEF loaded and Hailo device configured.")
     except Exception as e:
         print(f"❌ Failed to load HEF or configure Hailo: {e}")
@@ -128,10 +130,10 @@ def camera_reader(cap, queue, cam_name):
                     except: pass
                 queue.put(frame)
             else:
-                time.sleep(0.05)
+                time.sleep(0.01)
         except Exception as e:
             print(f"⚠️ Camera {cam_name} read error: {e}")
-            time.sleep(0.1)
+            time.sleep(0.05)
 
 caps = []
 threads = []
@@ -159,6 +161,10 @@ except Exception as e:
     print("   Running in headless mode (no display)")
 
 last_frames = [None for _ in cameras]
+fps_times = [time.time() for _ in cameras]
+fps_counts = [0 for _ in cameras]
+fps_values = [0.0 for _ in cameras]
+
 print("🚀 Starting person detection...")
 print("   Press 'q' to quit (or Ctrl+C)")
 
@@ -177,7 +183,15 @@ try:
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             else:
                 try:
+                    start = time.time()
                     detections = run_inference(frame)
+                    end = time.time()
+                    fps_counts[i] += 1
+                    elapsed = end - fps_times[i]
+                    if elapsed >= 1.0:
+                        fps_values[i] = fps_counts[i] / elapsed
+                        fps_counts[i] = 0
+                        fps_times[i] = end
                     for det in detections:
                         x1, y1, x2, y2 = det['bbox']
                         conf = det['conf']
@@ -186,6 +200,7 @@ try:
                         cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1-10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                     cv2.putText(frame, cam['name'], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    cv2.putText(frame, f"FPS: {fps_values[i]:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
                 except Exception as e:
                     print(f"⚠️ Processing error: {e}")
             frames.append(frame)
