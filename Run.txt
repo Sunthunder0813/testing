@@ -20,8 +20,16 @@ sudo apt install -y python3-pip
 # Kernel headers, DKMS, build-essential (for Hailo PCIe driver)
 sudo apt install -y dkms build-essential linux-headers-$(uname -r)
 
-# --- PYTHON PACKAGES ---
-sudo apt install -y python3-numpy
+# --- PYTHON VIRTUAL ENVIRONMENT (recommended) ---
+sudo apt install -y python3-venv
+python3 -m venv ~/hailo-venv
+source ~/hailo-venv/bin/activate
+
+# Upgrade pip inside the venv
+pip install --upgrade pip
+
+# Install required Python packages inside the venv
+pip install numpy ultralytics hailo_platform opencv-python
 
 # --- HAILO SDK & PLATFORM ---
 sudo apt install -y hailo-all
