@@ -35,7 +35,7 @@ def main():
     stop_threads = False
 
     HEF_MODEL = "yolov8n_person.hef"
-    HEF_URL = "https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.13.0/hailo8l/yolov8n.hef"
+    HEF_URL = "https://github.com/hailo-ai/hailo-rpi5-examples/raw/main/resources/yolov8n.hef"
     INPUT_HEIGHT = 640
     INPUT_WIDTH = 640
     CONF_THRESH = 0.5
