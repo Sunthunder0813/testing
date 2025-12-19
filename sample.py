@@ -58,15 +58,26 @@ if HAILO_AVAILABLE:
         hef = HEF(HEF_MODEL)
         with VDevice() as device:
             network = device.configure(hef)[0]
-            infer = InferVStreams(network)
+            input_vstreams_params = network.create_input_vstream_params()
+            output_vstreams_params = network.create_output_vstream_params()
+            infer = InferVStreams(network, input_vstreams_params, output_vstreams_params)
         print("✅ HEF loaded and Hailo device configured.")
     except Exception as e:
         print(f"❌ Failed to load HEF or configure Hailo: {e}")
         HAILO_AVAILABLE = False
+        try:
+            from ultralytics import YOLO
+            model = YOLO("yolov8n.pt")
+        except ImportError:
+            print("❌ 'ultralytics' not installed. Run: pip install ultralytics")
+            sys.exit(1)
+else:
+    try:
         from ultralytics import YOLO
         model = YOLO("yolov8n.pt")
-else:
-    model = YOLO("yolov8n.pt")
+    except ImportError:
+        print("❌ 'ultralytics' not installed. Run: pip install ultralytics")
+        sys.exit(1)
 
 def preprocess_frame(frame):
     img = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
