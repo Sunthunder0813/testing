@@ -7,7 +7,7 @@ from hailo_platform import HEF, VDevice, InferVStreams
 # ---------------- CONFIG ----------------
 CAMERA_URLS = [
     "rtsp://admin@192.168.18.2:554/stream1",
-    "rtsp://admin@192.168.18.71:554/stream1"
+    "rtsp://admin@192.168.18.113:554/stream1"
 ]
 HEF_PATH = "yolov8n_person.hef"
 INPUT_SIZE = 640
