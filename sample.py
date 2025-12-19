@@ -4,6 +4,7 @@ import numpy as np
 import threading
 import time
 import sys
+from datetime import datetime
 from hailo_platform import (
     HEF, VDevice, ConfigureParams, InputVStreamParams, 
     OutputVStreamParams, HailoStreamInterface, InferVStreams
@@ -15,59 +16,86 @@ CONF_THRESH = 0.55
 GREEN_TARGET = (0, 255, 127) 
 RTSP_USER = "admin"
 RTSP_PASS = "" # YOUR PASSWORD
+SAVE_PATH = "detections"
+
+# Create storage folder if it doesn't exist
+if not os.path.exists(SAVE_PATH):
+    os.makedirs(SAVE_PATH)
 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Zone A"},
     {"ip": "192.168.18.113", "name": "Zone B"},
 ]
 
-# ================= UI & DRAWING FUNCTIONS =================
-def draw_counter_hud(img, count, cam_name):
-    """Draws a professional HUD display for the person counter."""
-    text = f"CAM: {cam_name} | PERSON COUNT: {count}"
-    font = cv2.FONT_HERSHEY_DUPLEX
-    scale = 0.8
-    thickness = 2
-    
-    # Get text size for background rectangle
-    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
-    
-    # Draw Background Shadow Box (Black, semi-transparent)
-    # Positions the HUD at top-left with some padding
-    padding = 10
-    x, y = 20, 40
-    cv2.rectangle(img, (x - padding, y - th - padding), 
-                  (x + tw + padding, y + baseline + padding), (0, 0, 0), -1)
-    
-    # Draw Text
-    cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
-    
-    # Status Dot (Blinking effect logic)
-    dot_color = (0, 0, 255) if count > 0 else (100, 100, 100)
-    cv2.circle(img, (x + tw + 30, y - 10), 8, dot_color, -1)
+# ================= SIMPLE CENTROID TRACKER =================
+class CentroidTracker:
+    def __init__(self, max_disappeared=10):
+        self.next_obj_id = 1
+        self.objects = {} # ID -> Centroid
+        self.disappeared = {} # ID -> Count
+        self.max_disappeared = max_disappeared
 
-def draw_target_ui(img, box, score):
-    """Draws the Targeting Brackets around the detected person."""
+    def register(self, centroid):
+        self.objects[self.next_obj_id] = centroid
+        self.disappeared[self.next_obj_id] = 0
+        self.next_obj_id += 1
+        return self.next_obj_id - 1
+
+    def update(self, rects):
+        if len(rects) == 0:
+            for obj_id in list(self.disappeared.keys()):
+                self.disappeared[obj_id] += 1
+                if self.disappeared[obj_id] > self.max_disappeared:
+                    del self.objects[obj_id]
+                    del self.disappeared[obj_id]
+            return self.objects
+
+        input_centroids = np.zeros((len(rects), 2), dtype="int")
+        for (i, (x1, y1, x2, y2)) in enumerate(rects):
+            input_centroids[i] = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+
+        if len(self.objects) == 0:
+            for i in range(len(input_centroids)):
+                self.register(input_centroids[i])
+        else:
+            obj_ids = list(self.objects.keys())
+            obj_centroids = list(self.objects.values())
+            D = np.linalg.norm(np.array(obj_centroids)[:, np.newaxis] - input_centroids, axis=2)
+            rows = D.min(axis=1).argsort()
+            cols = D.argmin(axis=1)[rows]
+
+            used_rows = set()
+            used_cols = set()
+            for (row, col) in zip(rows, cols):
+                if row in used_rows or col in used_cols: continue
+                obj_id = obj_ids[row]
+                self.objects[obj_id] = input_centroids[col]
+                self.disappeared[obj_id] = 0
+                used_rows.add(row)
+                used_cols.add(col)
+
+        return self.objects
+
+# ================= UI & DRAWING =================
+def draw_ui(img, box, obj_id, score):
     x1, y1, x2, y2 = map(int, box)
     w, h = x2 - x1, y2 - y1
+    label = f"ID:{obj_id} | {int(score*100)}%"
     
-    # 1. Target Glow
-    overlay = img.copy()
-    cv2.rectangle(overlay, (x1, y1), (x2, y2), GREEN_TARGET, -1)
-    cv2.addWeighted(overlay, 0.12, img, 0.88, 0, img)
-
-    # 2. Main Border & Precision Corners
-    cv2.rectangle(img, (x1, y1), (x2, y2), GREEN_TARGET, 1)
-    c_len = int(w * 0.18) 
+    # Target Brackets
+    c_len = int(w * 0.18)
     t = 4
+    cv2.rectangle(img, (x1, y1), (x2, y2), GREEN_TARGET, 1)
     cv2.line(img, (x1, y1), (x1+c_len, y1), GREEN_TARGET, t) # TL
     cv2.line(img, (x1, y1), (x1, y1+c_len), GREEN_TARGET, t)
-    cv2.line(img, (x2, y1), (x2-c_len, y1), GREEN_TARGET, t) # TR
-    cv2.line(img, (x2, y1), (x2, y1+c_len), GREEN_TARGET, t)
-    cv2.line(img, (x1, y2), (x1+c_len, y2), GREEN_TARGET, t) # BL
-    cv2.line(img, (x1, y2), (x1, y2-c_len), GREEN_TARGET, t)
     cv2.line(img, (x2, y2), (x2-c_len, y2), GREEN_TARGET, t) # BR
     cv2.line(img, (x2, y2), (x2, y2-c_len), GREEN_TARGET, t)
+
+    # ID Tag
+    font = cv2.FONT_HERSHEY_DUPLEX
+    (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+    cv2.rectangle(img, (x1, y1 - th - 15), (x1 + tw + 15, y1), GREEN_TARGET, -1)
+    cv2.putText(img, label, (x1 + 7, y1 - 8), font, 0.5, (0,0,0), 1, cv2.LINE_AA)
 
 # ================= STREAM WORKER =================
 class CameraWorker:
@@ -75,7 +103,9 @@ class CameraWorker:
         self.name = name
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
         self.latest_frame = None
-        self.detections = []
+        self.detections = [] # [x1, y1, x2, y2, conf]
+        self.tracker = CentroidTracker(max_disappeared=15)
+        self.logged_ids = set()
         self.lock = threading.Lock()
         self.running = True
         threading.Thread(target=self._stream, daemon=True).start()
@@ -114,6 +144,7 @@ class AIModelManager:
                         resized = cv2.resize(img, (self.target_shape[1], self.target_shape[0]))
                         results = pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
                         raw_data = results[self.output_name][0]
+                        
                         valid_dets = []
                         if hasattr(raw_data, "__len__"):
                             for d in raw_data:
@@ -126,7 +157,7 @@ class AIModelManager:
 
 # ================= MAIN =================
 def main():
-    print("💎 Initializing Hailo-8L Surveillance Mode...")
+    print(f"🚀 AI Guard Active. Snapshots saving to: /{SAVE_PATH}")
     streams = [CameraWorker(c['ip'], c['name']) for c in CAMERAS]
     ai = AIModelManager(HEF_MODEL)
     threading.Thread(target=ai.run_inference, args=(streams,), daemon=True).start()
@@ -138,13 +169,31 @@ def main():
                 if s.latest_frame is None: continue
                 frame = s.latest_frame.copy()
                 dets = list(s.detections)
+            
+            # Update Tracker
+            rects = [d[:4] for d in dets]
+            tracked_objects = s.tracker.update(rects)
 
-            # 1. Draw Target Brackets
-            for d in dets:
-                draw_target_ui(frame, d[:4], d[4])
+            # Draw & Log
+            for (obj_id, centroid) in tracked_objects.items():
+                # Find matching detection for score and bounding box
+                for d in dets:
+                    # If centroid is inside this box, it's the right one
+                    if d[0] <= centroid[0] <= d[2] and d[1] <= centroid[1] <= d[3]:
+                        draw_ui(frame, d[:4], obj_id, d[4])
+                        
+                        # Snapshot Logic: Only log if this is a new ID
+                        if obj_id not in s.logged_ids:
+                            timestamp = datetime.now().strftime("%H-%M-%S")
+                            filename = f"{SAVE_PATH}/{s.name}_ID{obj_id}_{timestamp}.jpg"
+                            cv2.imwrite(filename, frame)
+                            s.logged_ids.add(obj_id)
+                        break
 
-            # 2. Draw the Person Counter HUD
-            draw_counter_hud(frame, len(dets), s.name)
+            # HUD Display
+            count_text = f"{s.name} | PEOPLE: {len(tracked_objects)}"
+            cv2.rectangle(frame, (10, 10), (450, 60), (0,0,0), -1)
+            cv2.putText(frame, count_text, (25, 45), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
             
             display_canvases.append(cv2.resize(frame, (854, 480)))
 
