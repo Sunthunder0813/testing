@@ -32,7 +32,7 @@ frame_queues = [Queue(maxsize=1) for _ in cameras]
 stop_threads = False
 
 HEF_MODEL = "yolov8n_person.hef"
-HEF_URL = "https://hailo.ai/wp-content/uploads/2023/07/yolov8n_person.hef"
+HEF_URL = "https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.13.0/hailo8l/yolov8n.hef"
 INPUT_HEIGHT = 640
 INPUT_WIDTH = 640
 CONF_THRESH = 0.5
