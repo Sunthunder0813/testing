@@ -3,143 +3,144 @@ import cv2
 import numpy as np
 import threading
 import time
-import sys
 from hailo_platform import (
     HEF, VDevice, ConfigureParams, InputVStreamParams, 
     OutputVStreamParams, HailoStreamInterface, InferVStreams
 )
 
-# ================= CONFIGURATION =================
+# ================= PERFORMANCE CONFIG =================
 HEF_MODEL = "yolov8n_person.hef"
-CONF_THRESH = 0.50
 RTSP_USER = "admin"
 RTSP_PASS = "" 
 
+# Smoothing: 0.1 (Liquid) to 0.9 (Instant)
+SMOOTH_ALPHA = 0.25 
+
 CAMERAS = [
-    {"ip": "192.168.18.2", "name": "Zone A"},
-    {"ip": "192.168.18.113", "name": "Zone B"},
+    {"ip": "192.168.18.2", "name": "Front Gate"},
+    {"ip": "192.168.18.113", "name": "Driveway"},
 ]
 
-# ================= ROBUST CAMERA WORKER =================
-class CameraWorker:
+# ================= PI 5 OPTIMIZED CAPTURE =================
+class Pi5Camera:
     def __init__(self, ip, name):
         self.name = name
-        # Force TCP transport to prevent UDP packet loss (solves POC 0 errors)
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        # Optimization: Force TCP and disable all buffering for real-time speed
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
-        self.latest_frame = None
+        
+        self.frame = None
         self.detections = []
+        self.smoothed_boxes = {} # ID tracking
         self.lock = threading.Lock()
         self.running = True
-        threading.Thread(target=self._stream, daemon=True).start()
+        
+        threading.Thread(target=self._capture_loop, daemon=True).start()
 
-    def _stream(self):
+    def _capture_loop(self):
+        cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         while self.running:
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-            # Crucial for smoothness: clear the buffer
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            while self.running:
-                ret, frame = cap.read()
-                if not ret:
-                    print(f"⚠️ {self.name} connection lost. Reconnecting...")
-                    break
-                
-                with self.lock:
-                    self.latest_frame = frame
-            
-            cap.release()
-            time.sleep(2) # Wait before reconnecting
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(1)
+                cap.open(self.url)
+                continue
+            with self.lock:
+                self.frame = frame
 
-# ================= HAILO MANAGER WITH EXCEPTION HANDLING =================
-class AIModelManager:
+# ================= HAILO 13-TOPS ENGINE =================
+class HailoEngine:
     def __init__(self, model_path):
-        try:
-            self.hef = HEF(model_path)
-            self.device = VDevice()
-            self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2]
-            params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
-            self.network_group = self.device.configure(self.hef, params)[0]
-            self.input_name = self.hef.get_input_vstream_infos()[0].name
-            self.output_name = self.hef.get_output_vstream_infos()[0].name
-        except Exception as e:
-            print(f"❌ Hailo Init Error: {e}")
-            sys.exit(1)
+        self.device = VDevice()
+        self.hef = HEF(model_path)
+        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2] # (H, W)
+        
+        # PCIe Optimization for Pi 5
+        params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
+        self.network_group = self.device.configure(self.hef, params)[0]
+        self.input_v = self.hef.get_input_vstream_infos()[0].name
+        self.output_v = self.hef.get_output_vstream_infos()[0].name
 
-    def run_inference(self, streams):
-        try:
-            with self.network_group.activate():
-                with InferVStreams(self.network_group, 
-                                   InputVStreamParams.make(self.network_group), 
-                                   OutputVStreamParams.make(self.network_group)) as pipeline:
-                    while True:
-                        for s in streams:
-                            img = None
-                            with s.lock:
-                                if s.latest_frame is not None:
-                                    img = s.latest_frame.copy()
-                            
-                            if img is None: continue
-                            
-                            fh, fw = img.shape[:2]
-                            resized = cv2.resize(img, (self.target_shape[1], self.target_shape[0]))
-                            
-                            # Perform actual inference
-                            results = pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
-                            raw_data = results[self.output_name][0]
-                            
-                            valid_dets = []
-                            if hasattr(raw_data, "__len__"):
-                                for d in raw_data:
-                                    if len(d) >= 6:
-                                        ymin, xmin, ymax, xmax, conf, cls_id = d
-                                        if float(conf) > CONF_THRESH and int(cls_id) == 0:
-                                            valid_dets.append([int(xmin*fw), int(ymin*fh), int(xmax*fw), int(ymax*fh), float(conf)])
-                            
-                            with s.lock: s.detections = valid_dets
-                        time.sleep(0.001)
-        except Exception as e:
-            print(f"🤖 Inference Thread Stopped: {e}")
+    def infer_loop(self, cameras):
+        with self.network_group.activate():
+            with InferVStreams(self.network_group, 
+                               InputVStreamParams.make(self.network_group), 
+                               OutputVStreamParams.make(self.network_group)) as pipeline:
+                while True:
+                    for cam in cameras:
+                        with cam.lock:
+                            if cam.frame is None: continue
+                            raw_f = cam.frame.copy()
+                        
+                        h, w = raw_f.shape[:2]
+                        # Pi 5 handles resize extremely fast
+                        resized = cv2.resize(raw_f, (self.target_shape[1], self.target_shape[0]))
+                        
+                        # High-Speed Inference
+                        res = pipeline.infer({self.input_v: np.expand_dims(resized, axis=0)})
+                        raw_out = res[self.output_v][0]
+                        
+                        new_dets = []
+                        if hasattr(raw_out, "__len__"):
+                            for d in raw_out:
+                                # Class 0 is Person in YOLO
+                                if d[4] > 0.5 and int(d[5]) == 0:
+                                    # Convert normalized to pixel coordinates
+                                    new_dets.append([int(d[1]*w), int(d[0]*h), int(d[3]*w), int(d[2]*h)])
+                        
+                        with cam.lock:
+                            cam.detections = new_dets
 
-# ================= MAIN LOOP =================
+# ================= UI & SMOOTHING =================
+def smooth_ui(cam):
+    with cam.lock:
+        raw_boxes = cam.detections
+        # Apply Temporal Smoothing (Alpha Filter)
+        for i, target in enumerate(raw_boxes):
+            if i not in cam.smoothed_boxes:
+                cam.smoothed_boxes[i] = np.array(target, dtype=float)
+            else:
+                curr = np.array(target)
+                prev = cam.smoothed_boxes[i]
+                cam.smoothed_boxes[i] = (prev * (1 - SMOOTH_ALPHA)) + (curr * SMOOTH_ALPHA)
+        return list(cam.smoothed_boxes.values())
+
 def main():
-    workers = [CameraWorker(c['ip'], c['name']) for c in CAMERAS]
-    ai = AIModelManager(HEF_MODEL)
+    print("💎 Pi 5 + Hailo-8L: Industrial Surveillance Mode")
+    cams = [Pi5Camera(c['ip'], c['name']) for c in CAMERAS]
+    engine = HailoEngine(HEF_MODEL)
     
-    # Start inference in a daemon thread
-    inf_thread = threading.Thread(target=ai.run_inference, args=(workers,), daemon=True)
-    inf_thread.start()
+    # Run Inference in background
+    threading.Thread(target=engine.infer_loop, args=(cams,), daemon=True).start()
 
-    print("✅ System Online. Press 'q' to quit safely.")
+    while True:
+        display_list = []
+        for cam in cams:
+            with cam.lock:
+                if cam.frame is None: continue
+                frame = cam.frame.copy()
+            
+            # Get smoothed boxes
+            boxes = smooth_ui(cam)
+            
+            # Draw HUD
+            for box in boxes:
+                x1, y1, x2, y2 = box.astype(int)
+                # Tech-style brackets
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 127), 2)
+                cv2.circle(frame, (x1+(x2-x1)//2, y1+(y2-y1)//2), 3, (0, 255, 127), -1)
 
-    try:
-        while True:
-            canvases = []
-            for s in workers:
-                with s.lock:
-                    if s.latest_frame is None: continue
-                    frame = s.latest_frame.copy()
-                    dets = list(s.detections)
+            cv2.putText(frame, f"{cam.name} | PERSONS: {len(boxes)}", (20, 40), 1, 1.5, (255,255,255), 2)
+            display_list.append(cv2.resize(frame, (854, 480)))
 
-                # Draw detections
-                for d in dets:
-                    cv2.rectangle(frame, (d[0], d[1]), (d[2], d[3]), (0, 255, 0), 2)
-                
-                cv2.putText(frame, f"{s.name} | Count: {len(dets)}", (20, 40), 1, 1.5, (255, 255, 255), 2)
-                canvases.append(cv2.resize(frame, (640, 480)))
+        if display_list:
+            cv2.imshow("Hailo-8L Pi5 Dashboard", cv2.hconcat(display_list) if len(display_list)>1 else display_list[0])
 
-            if canvases:
-                combined = cv2.hconcat(canvases) if len(canvases) > 1 else canvases[0]
-                cv2.imshow("Hailo-8L Secure Feed", combined)
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-    finally:
-        print("Cleaning up resources...")
-        for s in workers: s.running = False
-        cv2.destroyAllWindows()
-        # Essential: release the device to prevent "terminate called" on next run
-        ai.device.release()
+    cv2.destroyAllWindows()
+    engine.device.release()
 
 if __name__ == "__main__":
     main()
