@@ -53,14 +53,11 @@ pip3 install ultralytics
 
 
 
+(hailo-venv) set-admin@raspberrypi:~/testing $ python sample.py
+✅ Hailo platform detected
+❌ Failed to load HEF or configure Hailo: 'ConfiguredNetwork' object has no attribute 'create_input_vstream_params'
+   This script requires a working Hailo device. Exiting.
 
-
-
-sudo apt update
-sudo apt install -y curl gnupg
-curl -fsSL https://hailo.ai/files/hailo-apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/hailo.gpg
-echo "deb [signed-by=/usr/share/keyrings/hailo.gpg] https://hailo.ai/files/apt stable main" | sudo tee /etc/apt/sources.list.d/hailo.list
-sudo apt update
 
 sudo apt install -y hailo-all
 
