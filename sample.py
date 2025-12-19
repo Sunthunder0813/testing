@@ -3,22 +3,15 @@ import cv2
 import numpy as np
 import threading
 import time
-import signal
 import sys
-
-# 1. CORE HAILO IMPORTS
-try:
-    from hailo_platform import (
-        HEF, VDevice, ConfigureParams, InputVStreamParams, 
-        OutputVStreamParams, HailoStreamInterface, InferVStreams
-    )
-except ImportError:
-    print("❌ Error: hailo_platform not found.")
-    sys.exit(1)
+from hailo_platform import (
+    HEF, VDevice, ConfigureParams, InputVStreamParams, 
+    OutputVStreamParams, HailoStreamInterface, InferVStreams
+)
 
 # ================= CONFIGURATION =================
 HEF_MODEL = "yolov8n_person.hef"
-CONF_THRESH = 0.55  # High confidence for accuracy
+CONF_THRESH = 0.55  
 GREEN_TARGET = (0, 255, 127) # Safety Neon Green
 RTSP_USER = "admin"
 RTSP_PASS = "" # YOUR PASSWORD
@@ -30,21 +23,21 @@ CAMERAS = [
 
 # ================= ADVANCED TARGET DRAWING =================
 def draw_target_ui(img, box, score):
+    """Draws a professional 'Target Lock' bracket around the person."""
     x1, y1, x2, y2 = map(int, box)
     w, h = x2 - x1, y2 - y1
-    label = f"TARGET: {int(score*100)}%"
+    label = f"LOCKED: {int(score*100)}%"
     
-    # 1. Subtle Glow (Fill)
+    # 1. Target Glow (Semi-transparent background)
     overlay = img.copy()
     cv2.rectangle(overlay, (x1, y1), (x2, y2), GREEN_TARGET, -1)
-    cv2.addWeighted(overlay, 0.1, img, 0.9, 0, img)
+    cv2.addWeighted(overlay, 0.12, img, 0.88, 0, img)
 
     # 2. Main Thin Border
     cv2.rectangle(img, (x1, y1), (x2, y2), GREEN_TARGET, 1)
 
-    # 3. Weighted Corners (Targeting Effect)
-    # This makes the border "look" like it's locking onto the person
-    c_len = int(w * 0.15) # Length of the corner lines
+    # 3. Precision Corners (Targeting Brackets)
+    c_len = int(w * 0.18) # Length of the corner brackets
     thickness = 4
     # Top-Left
     cv2.line(img, (x1, y1), (x1 + c_len, y1), GREEN_TARGET, thickness)
@@ -59,9 +52,10 @@ def draw_target_ui(img, box, score):
     cv2.line(img, (x2, y2), (x2 - c_len, y2), GREEN_TARGET, thickness)
     cv2.line(img, (x2, y2), (x2, y2 - c_len), GREEN_TARGET, thickness)
 
-    # 4. Label with Background Tag
+    # 4. Floating Data Tag
     font = cv2.FONT_HERSHEY_DUPLEX
     (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+    # Draw tag above the bracket
     cv2.rectangle(img, (x1, y1 - th - 15), (x1 + tw + 15, y1), GREEN_TARGET, -1)
     cv2.putText(img, label, (x1 + 7, y1 - 8), font, 0.5, (0,0,0), 1, cv2.LINE_AA)
 
@@ -77,7 +71,9 @@ class CameraWorker:
         threading.Thread(target=self._stream, daemon=True).start()
 
     def _stream(self):
+        # Increased buffer for smoother RTSP
         cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
         while self.running:
             ret, frame = cap.read()
             if ret:
@@ -110,22 +106,24 @@ class AIModelManager:
                             img = s.latest_frame.copy()
                         
                         fh, fw = img.shape[:2]
+                        # YOLO models typically need RGB 640x640
                         resized = cv2.resize(img, (self.target_shape[1], self.target_shape[0]))
                         
                         # Inference
                         results = pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
                         
-                        # SAFE PARSING (Avoids ValueError)
+                        # FIXED: Safe Parsing to bypass NumPy inhomogeneous error
                         raw_data = results[self.output_name][0]
                         valid_dets = []
                         
-                        # Only loop if raw_data is iterable
-                        if hasattr(raw_data, "__getitem__"):
-                            for i in range(len(raw_data)):
-                                d = raw_data[i]
+                        # Iterate through the raw list/array without forcing a fixed NumPy shape
+                        if hasattr(raw_data, "__len__"):
+                            for d in raw_data:
                                 if len(d) >= 6:
+                                    # YOLOv8 format: [ymin, xmin, ymax, xmax, conf, class_id]
                                     ymin, xmin, ymax, xmax, conf, cls_id = d
-                                    # STRICT PERSON FILTER (Class 0)
+                                    
+                                    # Target ONLY Person (Class 0)
                                     if float(conf) > CONF_THRESH and int(cls_id) == 0:
                                         valid_dets.append([
                                             int(xmin * fw), int(ymin * fh), 
@@ -137,10 +135,11 @@ class AIModelManager:
 
 # ================= MAIN EXECUTION =================
 def main():
-    print("🚀 Initializing Hailo-8L Target Guard...")
+    print("💎 Hailo-8L: Person Target Lock Mode Active")
     streams = [CameraWorker(c['ip'], c['name']) for c in CAMERAS]
     ai = AIModelManager(HEF_MODEL)
     
+    # Start AI Engine
     threading.Thread(target=ai.run_inference, args=(streams,), daemon=True).start()
 
     while True:
@@ -151,21 +150,26 @@ def main():
                 frame = s.latest_frame.copy()
                 dets = list(s.detections)
 
+            # Draw the person-specific target locks
             for d in dets:
                 draw_target_ui(frame, d[:4], d[4])
 
-            # Label the Camera
-            cv2.putText(frame, f"LIVE | {s.name}", (30, 50), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+            # HUD Labeling
+            status_text = f"CAM: {s.name} | TARGETS: {len(dets)}"
+            cv2.putText(frame, status_text, (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
             display_canvases.append(cv2.resize(frame, (854, 480)))
 
         if display_canvases:
+            # Side-by-side view
             combined = cv2.hconcat(display_canvases) if len(display_canvases) > 1 else display_canvases[0]
-            cv2.imshow("Hailo-8L Precision Detection", combined)
+            cv2.imshow("Hailo-8L Guard: Person Detection", combined)
         
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
+    print("\n[!] Stopping AI Engine...")
     cv2.destroyAllWindows()
     ai.device.release()
+    print("[✓] Done.")
 
 if __name__ == "__main__":
     main()
