@@ -39,7 +39,7 @@ def main():
 
     # -------- MODEL CONFIG --------
     # Use the filename we downloaded earlier
-    HEF_MODEL = "yolov8n.hef" 
+    HEF_MODEL = "yolov8n_person.hef" 
     INPUT_WIDTH = 640
     INPUT_HEIGHT = 640
     CONF_THRESH = 0.5
