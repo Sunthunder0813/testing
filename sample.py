@@ -42,7 +42,7 @@ class Pi5Camera:
                 cap.open(self.url)
                 continue
             with self.lock:
-                self.frame = frame # Always overwrite with newest frame
+                self.frame = frame
 
 # ================= HAILO ENGINE =================
 class HailoEngine:
@@ -74,49 +74,47 @@ class HailoEngine:
                         
                         # Inference
                         res = pipeline.infer({self.input_v: np.expand_dims(resized, axis=0)})
-                        # Res format can be {name: [array]} or {name: array}
-                        raw_out = res[self.output_v]
                         
-                        # Handle potential batch list wrapping
-                        if isinstance(raw_out, list):
-                            data = raw_out[0]
-                        else:
-                            data = raw_out
+                        # FIX: Handle raw_out as a list or array
+                        raw_out = res[self.output_v]
+                        data = raw_out[0] if isinstance(raw_out, list) else raw_out
 
                         new_dets = []
-                        # Correcting the "length-1 array" conversion error
-                        if data is not None and len(data.shape) >= 2:
+                        # Verification of shape (e.g., [N, 6])
+                        if data is not None and hasattr(data, 'shape') and len(data.shape) >= 2:
                             for d in data:
-                                # Logic: Access values as scalars even if wrapped in arrays
-                                try:
-                                    conf = float(d[4]) if d[4].size == 1 else float(d[4][0])
-                                    cls = int(d[5]) if d[5].size == 1 else int(d[5][0])
-                                    
-                                    if conf > 0.45 and cls == 0: # Person detection
-                                        new_dets.append([
-                                            int(d[1]*w), int(d[0]*h), # x1, y1
-                                            int(d[3]*w), int(d[2]*h)  # x2, y2
-                                        ])
-                                except (IndexError, TypeError):
-                                    continue
+                                # Ensure it has at least 6 elements [y1, x1, y2, x2, conf, cls]
+                                if len(d) >= 6:
+                                    try:
+                                        conf = float(d[4])
+                                        cls = int(d[5])
+                                        if conf > 0.45 and cls == 0:
+                                            # Scale normalized to pixel coordinates
+                                            new_dets.append([
+                                                int(d[1]*w), int(d[0]*h), 
+                                                int(d[3]*w), int(d[2]*h)
+                                            ])
+                                    except: continue
 
                         with cam.lock:
                             cam.detections = new_dets
 
-                        # FPS Calculation
+                        # Update FPS
                         curr_time = time.time()
-                        self.fps = 1 / (curr_time - prev_time)
+                        self.fps = 1 / (curr_time - prev_time) if curr_time > prev_time else 0
                         prev_time = curr_time
 
-# ================= MAIN DISPLAY =================
+# ================= MAIN DASHBOARD =================
 def main():
-    print("💎 Pi 5 (Gen 3) + Hailo-8L: Running Dashboard...")
+    print("💎 Pi 5 (Gen 3) + Hailo-8L: Industrial Surveillance Mode")
     cams = [Pi5Camera(c['ip'], c['name']) for c in CAMERAS]
     engine = None
     
     try:
         engine = HailoEngine(HEF_MODEL)
-        threading.Thread(target=engine.infer_loop, args=(cams,), daemon=True).start()
+        # Run inference in a background thread
+        t = threading.Thread(target=engine.infer_loop, args=(cams,), daemon=True)
+        t.start()
 
         while True:
             display_frames = []
@@ -124,22 +122,28 @@ def main():
                 with cam.lock:
                     if cam.frame is None: continue
                     frame = cam.frame.copy()
-                    boxes = cam.detections
+                    boxes = list(cam.detections)
                 
+                # Draw boxes
                 for box in boxes:
                     cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 127), 2)
                 
+                # Dashboard text
                 cv2.putText(frame, f"{cam.name} | FPS: {engine.fps:.1f}", (20, 40), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 display_frames.append(cv2.resize(frame, (854, 480)))
 
             if display_frames:
+                # Merge cameras side-by-side
                 combined = cv2.hconcat(display_frames) if len(display_frames) > 1 else display_frames[0]
                 cv2.imshow("Hailo Surveillance", combined)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+    except Exception as e:
+        print(f"Main Loop Error: {e}")
     finally:
+        print("Cleaning up...")
         if engine: engine.device.release()
         cv2.destroyAllWindows()
 
