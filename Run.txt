@@ -52,4 +52,6 @@ pip3 install ultralytics
 
 
 
-https://github.com/hailo-ai/hailo-rpi5-examples/raw/main/resources/yolov8n.hef -O yolov8n.hef
+(hailo-venv) set-admin@raspberrypi:~/testing $ python sample.py
+✅ Hailo platform detected
+❌ Hailo init failed: 'ConfiguredNetwork' object has no attribute 'create_input_vstream_params'
