@@ -78,7 +78,7 @@ class HailoEngine:
                         
                         # Inference
                         res = pipeline.infer({self.input_v: np.expand_dims(resized, axis=0)})
-                        raw_out = res[self.output_v][0]
+                        raw_out = res[self.output_v] # This is typically a list or dict of arrays
                         
                         # Calculate FPS
                         curr_time = time.time()
@@ -86,11 +86,25 @@ class HailoEngine:
                         prev_time = curr_time
 
                         new_dets = []
-                        # Robust Parsing to fix IndexError
-                        if raw_out is not None and len(raw_out.shape) >= 2:
-                            for d in raw_out:
-                                if len(d) >= 6: # Ensure index 4 and 5 exist
-                                    if d[4] > 0.45 and int(d[5]) == 0:
+                        
+                        # FIX: Handle cases where output is a list (Hailo NMS format)
+                        detections_to_process = []
+                        if isinstance(raw_out, list):
+                            # It's a list of arrays (usually one per batch or class)
+                            if len(raw_out) > 0:
+                                detections_to_process = raw_out[0]
+                        elif isinstance(raw_out, np.ndarray):
+                            # It's a single raw array
+                            detections_to_process = raw_out
+                        
+                        # Process the flattened detection array
+                        if len(detections_to_process) > 0:
+                            for d in detections_to_process:
+                                if len(d) >= 6: 
+                                    conf = d[4]
+                                    cls = int(d[5])
+                                    if conf > 0.45 and cls == 0:
+                                        # Convert normalized [y1, x1, y2, x2] to pixel [x1, y1, x2, y2]
                                         new_dets.append([int(d[1]*w), int(d[0]*h), int(d[3]*w), int(d[2]*h)])
                         
                         with cam.lock:
@@ -130,16 +144,17 @@ def main():
                 boxes = smooth_ui(cam)
                 for box in boxes:
                     x1, y1, x2, y2 = box.astype(int)
+                    # Green Tech Style
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 127), 2)
                 
-                # Overlay Camera Name and Stats
-                cv2.putText(frame, f"{cam.name} | FPS: {engine.fps:.1f}", (20, 40), 
+                # Overlay Stats
+                cv2.putText(frame, f"{cam.name} | NPU FPS: {engine.fps:.1f}", (20, 40), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 127), 2)
                 display_list.append(cv2.resize(frame, (854, 480)))
 
             if display_list:
                 combined = cv2.hconcat(display_list) if len(display_list)>1 else display_list[0]
-                cv2.imshow("Hailo-8L Pi5 Dashboard", combined)
+                cv2.imshow("Hailo-8L Dashboard", combined)
 
             if cv2.waitKey(1) & 0xFF == ord('q'): break
 
