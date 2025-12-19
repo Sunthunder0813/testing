@@ -5,26 +5,27 @@ import time
 from queue import Queue, Empty
 from ultralytics import YOLO
 
-# ================= HIGH-SPEED CONFIG =================
-# Use 'yolov8n.pt' for the fastest CPU performance
-MODEL_PATH = "yolov8n.pt" 
-BATCH_SIZE = 1 # CPU usually performs better with batch 1 for real-time
+# ================= CONFIGURATION =================
+MODEL_PATH = "yolov8n.pt"  # Nano model is fastest for CPU
 RTSP_USER = "admin"
 RTSP_PASS = ""
+
+# List of COCO IDs to detect: 
+# 0: person, 1: bicycle, 2: car, 3: motorcycle, 15: bird, 16: cat, 17: dog
+TARGET_CLASSES = [0, 1, 2, 3, 15, 16, 17]
 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Front Gate"},
     {"ip": "192.168.18.113", "name": "Driveway"},
 ]
 
-# ================= CPU INFERENCE ENGINE =================
+# ================= CPU ENGINE =================
 class CPUTurboEngine:
     def __init__(self, model_path):
-        # Load the standard PyTorch model (runs on CPU by default)
+        # Loads the standard PyTorch model (runs on CPU)
         self.model = YOLO(model_path)
-        self.input_queue = Queue(maxsize=128)
+        self.input_queue = Queue(maxsize=64)
         self.output_results = {}
-        
         self.running = True
         self.fps = 0
 
@@ -37,29 +38,38 @@ class CPUTurboEngine:
 
         while self.running:
             try:
-                # CPU is often faster at individual frames than small batches
+                # Get latest frame from any camera
                 key, frame = self.input_queue.get(timeout=0.01)
             except Empty:
                 continue
 
-            # 1. Run Inference (CPU)
-            # classes=[0] filters for 'person' only in COCO dataset
-            results = self.model.predict(frame, conf=0.45, classes=[0], verbose=False)
+            # 1. Run Inference
+            # imgsz=320 makes it much faster on Pi 5 CPU than default 640
+            results = self.model.predict(
+                frame, 
+                conf=0.4, 
+                imgsz=320, 
+                classes=TARGET_CLASSES, 
+                verbose=False
+            )
             
-            # 2. Extract Detections
-            # Results are in format: [y1, x1, y2, x2, conf] to match your original logic
+            # 2. Extract Data
             if len(results) > 0:
                 boxes = results[0].boxes
                 raw_dets = []
                 for box in boxes:
-                    coords = box.xyxyn[0].tolist() # Normalized [x1, y1, x2, y2]
+                    # Normalized coords [x1, y1, x2, y2]
+                    coords = box.xyxyn[0].tolist()
                     conf = float(box.conf[0])
-                    # Reorder to match your original loop: [y1, x1, y2, x2, conf]
-                    raw_dets.append([coords[1], coords[0], coords[3], coords[2], conf])
+                    cls_id = int(box.cls[0])
+                    label = self.model.names[cls_id]
+                    
+                    # Store as [y1, x1, y2, x2, conf, label]
+                    raw_dets.append([coords[1], coords[0], coords[3], coords[2], conf, label])
                 
                 self.output_results[key] = raw_dets
 
-            # Update FPS tracking
+            # FPS Tracking
             frame_count += 1
             if time.time() - last_time >= 1.0:
                 self.fps = frame_count / (time.time() - last_time)
@@ -84,16 +94,19 @@ class CameraWorker:
         while True:
             ret, frame = cap.read()
             if not ret:
-                time.sleep(1)
+                time.sleep(2)
                 cap.open(self.url)
                 continue
             
-            # Use a smaller size for CPU inference to maintain FPS
-            # YOLOv8n default is 640x640
             key = f"{self.name}_{f_idx}"
-            self.engine.input_queue.put((key, frame))
+            
+            # Non-blocking put: if queue is full, skip frame to stay real-time
+            try:
+                self.engine.input_queue.put_nowait((key, frame))
+            except:
+                pass
 
-            # Fetch results
+            # Check for results belonging to this camera
             if key in self.engine.output_results:
                 dets = self.engine.output_results.pop(key)
                 with self.lock:
@@ -103,9 +116,9 @@ class CameraWorker:
                 self.latest_frame = frame
             f_idx += 1
 
-# ================= MAIN =================
+# ================= MAIN LOOP =================
 def main():
-    print("🚀 Running YOLOv8 on CPU Mode")
+    print("🚀 Starting CPU Object Detection (Person/Vehicle/Pet)")
     engine = CPUTurboEngine(MODEL_PATH)
     engine.start()
     
@@ -120,19 +133,33 @@ def main():
                 dets = w.latest_dets
             
             fh, fw = img.shape[:2]
-            if dets:
-                for d in dets:
-                    # d format: [y1, x1, y2, x2, conf]
-                    y1, x1, y2, x2 = int(d[0]*fh), int(d[1]*fw), int(d[2]*fh), int(d[3]*fw)
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 127), 2)
+            
+            # Draw detections
+            for d in dets:
+                # Format: [y1, x1, y2, x2, conf, label]
+                y1, x1, y2, x2 = int(d[0]*fh), int(d[1]*fw), int(d[2]*fh), int(d[3]*fw)
+                label = d[5]
+                conf = d[4]
 
-            cv2.putText(img, f"{w.name} | CPU FPS: {engine.fps:.1f}", (20, 40), 
+                color = (0, 255, 127) # Bright Green
+                cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+                
+                # Label background
+                label_txt = f"{label} {conf:.2f}"
+                cv2.putText(img, label_txt, (x1, y1 - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+            # Dashboard Info
+            cv2.putText(img, f"{w.name} | Total CPU FPS: {engine.fps:.1f}", (20, 40), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Resize for display grid (SD Resolution)
             display_frames.append(cv2.resize(img, (854, 480)))
 
         if display_frames:
+            # Combine camera views side-by-side
             combined = cv2.hconcat(display_frames) if len(display_frames) > 1 else display_frames[0]
-            cv2.imshow("CPU Detection Dashboard", combined)
+            cv2.imshow("Multi-Object CPU Dashboard", combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
