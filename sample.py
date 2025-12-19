@@ -18,9 +18,8 @@ except ImportError:
 
 # ================= CONFIGURATION =================
 HEF_MODEL = "yolov8n_person.hef"
-CONF_THRESH = 0.50  # Increased for higher precision
-GREEN_TARGET = (0, 255, 127) # Safety Green
-SHADOW = (0, 30, 0)
+CONF_THRESH = 0.50  
+GREEN_TARGET = (0, 255, 127) 
 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Front Entry"},
@@ -40,28 +39,18 @@ def draw_target(img, box, label):
     x, y, x2, y2 = map(int, box)
     w, h = x2 - x, y2 - y
     
-    # 1. Outer Shadow (Better visibility on bright backgrounds)
-    cv2.rectangle(img, (x-1, y-1), (x2+1, y2+1), (0,0,0), 1)
-    
-    # 2. Main "Safety Green" Box
     cv2.rectangle(img, (x, y), (x2, y2), GREEN_TARGET, 2)
-
-    # 3. High-Visibility Corners
+    # Corners
     c_len = int(w * 0.2)
-    # TL
     cv2.line(img, (x, y), (x + c_len, y), GREEN_TARGET, 5)
     cv2.line(img, (x, y), (x, y + c_len), GREEN_TARGET, 5)
-    # TR
     cv2.line(img, (x2, y), (x2 - c_len, y), GREEN_TARGET, 5)
     cv2.line(img, (x2, y), (x2, y + c_len), GREEN_TARGET, 5)
-    # BL
     cv2.line(img, (x, y2), (x + c_len, y2), GREEN_TARGET, 5)
     cv2.line(img, (x, y2), (x, y2 - c_len), GREEN_TARGET, 5)
-    # BR
     cv2.line(img, (x2, y2), (x2 - c_len, y2), GREEN_TARGET, 5)
     cv2.line(img, (x2, y2), (x2, y2 - c_len), GREEN_TARGET, 5)
 
-    # 4. Professional Label Tag
     font = cv2.FONT_HERSHEY_DUPLEX
     (tw, th), _ = cv2.getTextSize(label, font, 0.6, 1)
     cv2.rectangle(img, (x, y - th - 15), (x + tw + 15, y), GREEN_TARGET, -1)
@@ -98,7 +87,7 @@ class AIWorker:
         
         self.input_name = self.hef.get_input_vstream_infos()[0].name
         self.output_name = self.hef.get_output_vstream_infos()[0].name
-        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2] # H, W
+        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2]
         self.streams = streams
 
     def _run(self):
@@ -113,25 +102,28 @@ class AIWorker:
                             if s.latest_frame is None: continue
                             frame = s.latest_frame.copy()
                         
-                        # Process
                         h, w = self.target_shape
                         resized = cv2.resize(frame, (w, h))
-                        results = infer_pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
                         
-                        raw_data = np.array(results[self.output_name][0])
+                        # Inference
+                        infer_results = infer_pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
+                        
+                        # FIX: Extract results as a raw list first to avoid NumPy inhomogeneous error
+                        detections_list = infer_results[self.output_name][0]
+                        
                         new_dets = []
                         fh, fw = frame.shape[:2]
 
-                        if raw_data.size > 0:
-                            for i in range(0, len(raw_data), 6):
-                                chunk = raw_data[i:i+6]
-                                if chunk.size < 6: break
+                        # Handle the data as a list of detections
+                        # Hailo NMS results are often padded; we iterate through the valid ones
+                        for detection in detections_list:
+                            # Depending on your HEF, this might be a flat array or a structured object
+                            # We assume flat array [ymin, xmin, ymax, xmax, conf, class_id]
+                            if len(detection) >= 6:
+                                ymin, xmin, ymax, xmax, conf, cls_id = detection
                                 
-                                ymin, xmin, ymax, xmax, conf, cls_id = chunk
-                                
-                                # --- STRICTOR FILTERING ---
-                                # cls_id 0.0 is 'Person' in COCO dataset
-                                if float(conf) > CONF_THRESH and int(cls_id) == 0:
+                                # Strict Person-Only Check
+                                if conf > CONF_THRESH and int(cls_id) == 0:
                                     new_dets.append([
                                         int(xmin * fw), int(ymin * fh), 
                                         int(xmax * fw), int(ymax * fh), float(conf)
@@ -142,11 +134,11 @@ class AIWorker:
 
 # ================= MAIN =================
 def main():
-    print("💎 Hailo-8L: Person Detection Mode Active")
+    print("💎 Hailo-8L: High-Accuracy Person Detection")
     streams = [StreamWorker(c['ip'], c['name']) for c in CAMERAS]
     ai = AIWorker(HEF_MODEL, streams)
     
-    ai_thread = threading.Thread(target=ai._run)
+    ai_thread = threading.Thread(target=ai._run, daemon=True)
     ai_thread.start()
 
     while not shutdown_requested:
@@ -160,7 +152,7 @@ def main():
             for d in dets:
                 draw_target(img, d[:4], f"PERSON {int(d[4]*100)}%")
 
-            cv2.putText(img, f"LIVE: {s.name}", (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(img, s.name, (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
             canvases.append(cv2.resize(img, (800, 450)))
 
         if canvases:
@@ -169,11 +161,9 @@ def main():
         
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-    print("\n[!] Stopping AI Engine...")
+    print("\n[!] Shutting down...")
     cv2.destroyAllWindows()
-    ai_thread.join(timeout=2)
     ai.device.release()
-    print("[✓] Done.")
 
 if __name__ == "__main__":
     main()
