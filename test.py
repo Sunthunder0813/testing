@@ -5,24 +5,24 @@ import time
 from queue import Queue, Empty
 from ultralytics import YOLO
 
-# ================= ⚡ PERFORMANCE CONFIG ⚡ =================
-MODEL_PATH = "yolov8n_ncnn_model"  # Path to your NCNN export folder
-INFERENCE_SIZE = 160               # Critical: Lowering to 160px enables 20+ FPS
-TARGET_CLASS = 0                   # 0 is the COCO class ID for "person"
-CONF_THRESHOLD = 0.40              # Minimum confidence to show a box
+# ================= ⚡ ACCURACY & SPEED CONFIG ⚡ =================
+MODEL_PATH = "yolov8n_ncnn_model"  
+# Use a tuple for aspect ratio: (Height, Width) 
+# 160x288 or 192x320 maintains the 16:9 ratio of most RTSP cameras
+INFERENCE_SIZE = (192, 320)         
+TARGET_CLASS = 0                   
+CONF_THRESHOLD = 0.35              # Lower = more detections, Higher = fewer "ghosts"
+IOU_THRESHOLD = 0.45               # Helps clean up overlapping boxes
 
-# Camera list: Add as many as needed (Pi 5 handles 2-3 comfortably at high FPS)
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Front Gate"},
     {"ip": "192.168.18.113", "name": "Driveway"},
 ]
 
-# ================= 🧠 TURBO INFERENCE ENGINE =================
 class TurboInferenceEngine:
     def __init__(self, model_path):
-        # Load NCNN model (optimized for ARM NEON instructions)
         self.model = YOLO(model_path, task='detect')
-        self.input_queue = Queue(maxsize=1)  # Only process the single freshest frame
+        self.input_queue = Queue(maxsize=1) 
         self.results = {}
         self.fps = 0
         self.running = True
@@ -36,34 +36,36 @@ class TurboInferenceEngine:
         
         while self.running:
             try:
-                # Grab the freshest frame from any camera
                 cam_name, frame = self.input_queue.get(timeout=0.01)
             except Empty:
                 continue
 
-            # Run person-only inference
-            # half=True and imgsz=160 are the performance keys here
+            # --- ACCURACY IMPROVEMENTS ---
+            # 1. Use 'rect=True' for rectangular aspect ratios
+            # 2. Set 'imgsz' to your specific tuple
             results = self.model.predict(
                 frame, 
                 imgsz=INFERENCE_SIZE, 
                 classes=[TARGET_CLASS], 
                 half=True, 
                 verbose=False,
-                conf=CONF_THRESHOLD
+                conf=CONF_THRESHOLD,
+                iou=IOU_THRESHOLD,
+                augment=False # Keep False for speed
             )
 
-            if results:
-                # Store normalized results to map back to original frame size
+            if results and len(results[0].boxes) > 0:
+                # Store pixel-relative coordinates for accurate drawing
                 self.results[cam_name] = results[0].boxes.data.cpu().numpy()
+            else:
+                self.results[cam_name] = []
 
-            # Calculate actual Inference FPS
             frame_count += 1
             if time.time() - last_time >= 1.0:
                 self.fps = frame_count
                 frame_count = 0
                 last_time = time.time()
 
-# ================= 📹 STREAM HANDLER =================
 class CameraStream:
     def __init__(self, camera_info, engine):
         self.name = camera_info['name']
@@ -74,30 +76,27 @@ class CameraStream:
 
     def _capture_loop(self):
         cap = cv2.VideoCapture(self.url)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Force minimal buffer for real-time
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
         
         while True:
             ret, frame = cap.read()
             if not ret:
-                time.sleep(2) # Retry connection
+                time.sleep(2) 
                 cap.open(self.url)
                 continue
             
             self.latest_frame = frame
             
-            # Feed the engine if it's ready for a new frame
             if self.engine.input_queue.empty():
                 try:
                     self.engine.input_queue.put_nowait((self.name, frame))
                 except: pass
 
-# ================= 🖥️ MAIN DASHBOARD =================
 def main():
-    print(f"🚀 Starting Person-Only Dashboard on Pi 5...")
+    print(f"🚀 Dashboard Running. Optimized for Person Detection Accuracy.")
     engine = TurboInferenceEngine(MODEL_PATH)
     engine.start()
 
-    # Initialize all cameras
     streams = [CameraStream(c, engine) for c in CAMERAS]
 
     while True:
@@ -107,31 +106,26 @@ def main():
             frame = s.latest_frame
             if frame is None: continue
             
-            # Draw detections for this specific camera
+            # Use a local copy to avoid drawing on the frame being sent to inference
+            draw_frame = frame.copy()
+            
             if s.name in engine.results:
                 dets = engine.results[s.name]
-                h, w_img = frame.shape[:2]
-                
                 for d in dets:
-                    # x1, y1, x2, y2, confidence, class_id
                     x1, y1, x2, y2, conf, cls = d
-                    
-                    # Draw green box for person
-                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                    cv2.putText(frame, f"PERSON {conf:.2f}", (int(x1), int(y1)-10), 
+                    # Draw with confidence for accuracy verification
+                    cv2.rectangle(draw_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                    cv2.putText(draw_frame, f"PER {conf:.2f}", (int(x1), int(y1)-10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            # Dashboard Overlay
-            cv2.putText(frame, f"{s.name} | Engine: {engine.fps} FPS", (20, 40), 
+            cv2.putText(draw_frame, f"{s.name} | Inference: {engine.fps} FPS", (20, 40), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            # Resize for dashboard grid
-            display_frames.append(cv2.resize(frame, (854, 480)))
+            display_frames.append(cv2.resize(draw_frame, (854, 480)))
 
         if display_frames:
-            # Layout: Horizontal stack of all cameras
             combined = np.hstack(display_frames) if len(display_frames) > 1 else display_frames[0]
-            cv2.imshow("Multi-Cam Person Detection", combined)
+            cv2.imshow("Multi-Cam Accurate Person Detection", combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
