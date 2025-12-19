@@ -56,14 +56,12 @@ pip3 install ultralytics
 
 
 
+sudo apt update
+sudo apt install -y curl gnupg
+curl -fsSL https://hailo.ai/files/hailo-apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/hailo.gpg
+echo "deb [signed-by=/usr/share/keyrings/hailo.gpg] https://hailo.ai/files/apt stable main" | sudo tee /etc/apt/sources.list.d/hailo.list
+sudo apt update
 
+sudo apt install -y hailo-all
 
-
-
-
-
-
-
-ERROR: Could not find a version that satisfies the requirement hailo_platform (from versions: none)
-ERROR: No matching distribution found for hailo_platform
 
