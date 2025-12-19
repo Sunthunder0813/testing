@@ -1,11 +1,34 @@
 set-admin@raspberrypi:~/testing $ python3 sample.py
-[ WARN:0@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc1 reported: Resource not found.
-[ WARN:1@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Resource not found.
+[ WARN:0@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Resource not found.
+
+(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
+Trying to dispose element pipeline0, but it is in PAUSED instead of the NULL state.
+You need to explicitly set elements to the NULL state before
+dropping the final reference, to allow them to clean up.
+This problem may also be caused by a refcounting bug in the
+application or some element.
+
 [ WARN:1@0.129] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
-[ WARN:0@0.129] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+
+(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
+Trying to dispose element videoconvert0, but it is in PLAYING instead of the NULL state.
+You need to explicitly set elements to the NULL state before
+dropping the final reference, to allow them to clean up.
+This problem may also be caused by a refcounting bug in the
+application or some element.
+
 [ WARN:1@0.129] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
-[ WARN:0@0.129] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+
+(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
+Trying to dispose element appsink1, but it is in READY instead of the NULL state.
+You need to explicitly set elements to the NULL state before
+dropping the final reference, to allow them to clean up.
+This problem may also be caused by a refcounting bug in the
+application or some element.
+
 [ WARN:1@0.129] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
-[ WARN:0@0.129] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+❌ Cannot open RTSP stream: rtsp://admin@192.168.18.113:554/stream1
+[ WARN:0@0.131] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:0@0.131] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:0@0.131] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
 ❌ Cannot open RTSP stream: rtsp://admin@192.168.18.2:554/stream1
-❌ Cannot open RTSP stream: rtsp://admin@192.168.18.71:554/stream1
