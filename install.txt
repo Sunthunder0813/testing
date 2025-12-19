@@ -18,6 +18,12 @@ libgcc-s1 \
 libusb-1.0-0 \
 pciutils
 
+sudo nano /etc/apt/sources.list.d/raspi.list
+deb http://archive.raspberrypi.com/debian bookworm main
+curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/raspberrypi.gpg
+sudo apt update
+sudo apt install raspberrypi-kernel-headers
+
 
 
 sudo dpkg -i hailort_*.deb
