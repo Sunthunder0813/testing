@@ -5,26 +5,28 @@ import time
 from queue import Queue, Empty
 from ultralytics import YOLO
 
-# ================= CONFIGURATION =================
-MODEL_PATH = "yolov8n.pt"  # Nano model is fastest for CPU
+# ================= ENHANCED CONFIG =================
+MODEL_PATH = "yolov8n_ncnn_model"  # The folder you just created
 RTSP_USER = "admin"
 RTSP_PASS = ""
 
-# List of COCO IDs to detect: 
-# 0: person, 1: bicycle, 2: car, 3: motorcycle, 15: bird, 16: cat, 17: dog
-TARGET_CLASSES = [0, 1, 2, 3, 15, 16, 17]
+# Matches your export size for maximum speed
+INFERENCE_SIZE = 256 
+
+# COCO IDs: 0:person, 1:bicycle, 2:car, 3:motorcycle, 5:bus, 7:truck, 15:cat, 16:dog
+TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 15, 16]
 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Front Gate"},
     {"ip": "192.168.18.113", "name": "Driveway"},
 ]
 
-# ================= CPU ENGINE =================
-class CPUTurboEngine:
+# ================= TURBO CPU ENGINE =================
+class TurboCPUEngine:
     def __init__(self, model_path):
-        # Loads the standard PyTorch model (runs on CPU)
-        self.model = YOLO(model_path)
-        self.input_queue = Queue(maxsize=64)
+        # Load the NCNN version
+        self.model = YOLO(model_path, task='detect')
+        self.input_queue = Queue(maxsize=1) # Keep only the freshest frame
         self.output_results = {}
         self.running = True
         self.fps = 0
@@ -38,46 +40,36 @@ class CPUTurboEngine:
 
         while self.running:
             try:
-                # Get latest frame from any camera
-                key, frame = self.input_queue.get(timeout=0.01)
+                key, frame = self.input_queue.get(timeout=0.1)
             except Empty:
                 continue
 
-            # 1. Run Inference
-            # imgsz=320 makes it much faster on Pi 5 CPU than default 640
+            # Run NCNN inference
+            # half=True uses FP16 math which is faster on Pi 5
             results = self.model.predict(
                 frame, 
-                conf=0.4, 
-                imgsz=320, 
-                classes=TARGET_CLASSES, 
-                verbose=False
+                imgsz=INFERENCE_SIZE, 
+                conf=0.35, 
+                classes=TARGET_CLASSES,
+                verbose=False,
+                half=True 
             )
             
-            # 2. Extract Data
             if len(results) > 0:
                 boxes = results[0].boxes
-                raw_dets = []
-                for box in boxes:
-                    # Normalized coords [x1, y1, x2, y2]
-                    coords = box.xyxyn[0].tolist()
-                    conf = float(box.conf[0])
-                    cls_id = int(box.cls[0])
-                    label = self.model.names[cls_id]
-                    
-                    # Store as [y1, x1, y2, x2, conf, label]
-                    raw_dets.append([coords[1], coords[0], coords[3], coords[2], conf, label])
-                
-                self.output_results[key] = raw_dets
+                self.output_results[key] = [
+                    [*(box.xyxyn[0].tolist()), float(box.conf[0]), int(box.cls[0])] 
+                    for box in boxes
+                ]
 
-            # FPS Tracking
             frame_count += 1
             if time.time() - last_time >= 1.0:
                 self.fps = frame_count / (time.time() - last_time)
                 frame_count = 0
                 last_time = time.time()
 
-# ================= CAMERA WORKER =================
-class CameraWorker:
+# ================= STREAM WORKER =================
+class StreamWorker:
     def __init__(self, ip, name, engine):
         self.name = name
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
@@ -90,6 +82,7 @@ class CameraWorker:
     def _run(self):
         cap = cv2.VideoCapture(self.url)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
         f_idx = 0
         while True:
             ret, frame = cap.read()
@@ -100,13 +93,14 @@ class CameraWorker:
             
             key = f"{self.name}_{f_idx}"
             
-            # Non-blocking put: if queue is full, skip frame to stay real-time
-            try:
-                self.engine.input_queue.put_nowait((key, frame))
-            except:
-                pass
+            # If engine is busy, skip this frame to keep the stream "Live"
+            if self.engine.input_queue.empty():
+                try:
+                    self.engine.input_queue.put_nowait((key, frame))
+                except:
+                    pass
 
-            # Check for results belonging to this camera
+            # Update results if ready
             if key in self.engine.output_results:
                 dets = self.engine.output_results.pop(key)
                 with self.lock:
@@ -116,13 +110,15 @@ class CameraWorker:
                 self.latest_frame = frame
             f_idx += 1
 
-# ================= MAIN LOOP =================
+# ================= MAIN DISPLAY =================
 def main():
-    print("🚀 Starting CPU Object Detection (Person/Vehicle/Pet)")
-    engine = CPUTurboEngine(MODEL_PATH)
+    print(f"🚀 Pi 5 NCNN Turbo Running...")
+    print(f"Detecting: {', '.join([YOLO('yolov8n.pt').names[i] for i in TARGET_CLASSES])}")
+    
+    engine = TurboCPUEngine(MODEL_PATH)
     engine.start()
     
-    workers = [CameraWorker(c['ip'], c['name'], engine) for c in CAMERAS]
+    workers = [StreamWorker(c['ip'], c['name'], engine) for c in CAMERAS]
 
     while True:
         display_frames = []
@@ -132,39 +128,32 @@ def main():
                 img = w.latest_frame.copy()
                 dets = w.latest_dets
             
-            fh, fw = img.shape[:2]
-            
-            # Draw detections
+            h, w_img = img.shape[:2]
             for d in dets:
-                # Format: [y1, x1, y2, x2, conf, label]
-                y1, x1, y2, x2 = int(d[0]*fh), int(d[1]*fw), int(d[2]*fh), int(d[3]*fw)
-                label = d[5]
-                conf = d[4]
-
-                color = (0, 255, 127) # Bright Green
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+                # d: [x1, y1, x2, y2, conf, cls_id]
+                x1, y1, x2, y2 = int(d[0]*w_img), int(d[1]*h), int(d[2]*w_img), int(d[3]*h)
+                label = engine.model.names[d[5]]
                 
-                # Label background
-                label_txt = f"{label} {conf:.2f}"
-                cv2.putText(img, label_txt, (x1, y1 - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                # Draw stylized box
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(img, (x1, y1-25), (x1+100, y1), (0, 255, 0), -1)
+                cv2.putText(img, f"{label}", (x1+5, y1-7), 0, 0.6, (0, 0, 0), 2)
 
             # Dashboard Info
-            cv2.putText(img, f"{w.name} | Total CPU FPS: {engine.fps:.1f}", (20, 40), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(img, f"SYSTEM FPS: {engine.fps:.1f}", (20, 40), 
+                        cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 255), 2)
             
-            # Resize for display grid (SD Resolution)
+            # Resize for a clean dashboard view
             display_frames.append(cv2.resize(img, (854, 480)))
 
         if display_frames:
-            # Combine camera views side-by-side
+            # Combine camera views
             combined = cv2.hconcat(display_frames) if len(display_frames) > 1 else display_frames[0]
-            cv2.imshow("Multi-Object CPU Dashboard", combined)
+            cv2.imshow("Pi 5 CPU Turbo Dashboard", combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    engine.running = False
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
