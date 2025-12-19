@@ -1,1 +1,11 @@
-sudo apt install --reinstall raspberrypi-kernel=1:6.1.* raspberrypi-bootloader=1:6.1.*
+set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ sudo apt install --reinstall raspberrypi-kernel=1:6.1.* raspberrypi-bootloader=1:6.1.*
+Package raspberrypi-kernel is a virtual package provided by:
+  raspberrypi-kernel:armhf 1:1.20230405-1 (= 1:1.20230405-1)
+You should explicitly select one to install.
+
+Package raspberrypi-bootloader is a virtual package provided by:
+  raspberrypi-bootloader:armhf 1:1.20230405-1 (= 1:1.20230405-1)
+You should explicitly select one to install.
+
+Error: Version '1:6.1.*' for 'raspberrypi-kernel' was not found
+Error: Version '1:6.1.*' for 'raspberrypi-bootloader' was not found
