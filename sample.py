@@ -11,25 +11,36 @@ from hailo_platform import (
 
 # ================= HIGH-SPEED CONFIG =================
 HEF_MODEL = "yolov8n_person.hef"
-BATCH_SIZE = 8  # Matches your CLI test for max throughput
-NUM_CAMERAS = 2 
+BATCH_SIZE = 8
+RTSP_USER = "admin"
+RTSP_PASS = ""
+
+CAMERAS = [
+    {"ip": "192.168.18.2", "name": "Front Gate"},
+    {"ip": "192.168.18.113", "name": "Driveway"},
+]
 
 # ================= ASYNC ENGINE =================
 class HailoTurboEngine:
     def __init__(self, model_path):
         self.device = VDevice()
         self.hef = HEF(model_path)
-        self.input_queue = Queue(maxsize=128) # Large buffer for high FPS
+        self.input_queue = Queue(maxsize=128)
         self.output_results = {}
         
-        # Configure PCIe for Batching
-        params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
-        self.network_group = self.device.configure(self.hef, params)[0]
-        self.network_group.set_scheduler_batch_size(BATCH_SIZE)
+        # CORRECT WAY TO SET BATCH SIZE:
+        # We modify the network_params before calling self.device.configure
+        configure_params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
         
-        self.input_vstream_info = self.hef.get_input_vstream_infos()[0]
-        self.output_vstream_info = self.hef.get_output_vstream_infos()[0]
-        self.target_shape = self.input_vstream_info.shape[:2]
+        # The network name is typically the first key in the params dictionary
+        network_name = list(configure_params.network_group_params.keys())[0]
+        configure_params.network_group_params[network_name].batch_size = BATCH_SIZE
+        
+        self.network_group = self.device.configure(self.hef, configure_params)[0]
+        
+        self.input_v_info = self.hef.get_input_vstream_infos()[0]
+        self.output_v_info = self.hef.get_output_vstream_infos()[0]
+        self.target_shape = self.input_v_info.shape[:2] # (H, W)
         
         self.running = True
         self.fps = 0
@@ -50,7 +61,7 @@ class HailoTurboEngine:
                     batch_frames = []
                     batch_keys = []
 
-                    # 1. Pull frames to fill a batch
+                    # 1. Collect Batch
                     for _ in range(BATCH_SIZE):
                         try:
                             key, frame = self.input_queue.get(timeout=0.01)
@@ -61,71 +72,99 @@ class HailoTurboEngine:
 
                     if not batch_frames: continue
 
-                    # 2. Pad batch if cameras are slower than NPU
+                    # 2. Pad batch for NPU stability
                     actual_len = len(batch_frames)
                     while len(batch_frames) < BATCH_SIZE:
                         batch_frames.append(np.zeros_like(batch_frames[0]))
 
-                    # 3. High-Speed Inference
-                    input_data = {self.input_vstream_info.name: np.array(batch_frames)}
+                    # 3. Batch Inference
+                    input_data = {self.input_v_info.name: np.array(batch_frames)}
                     infer_results = pipeline.infer(input_data)
                     
-                    # 4. Parse NMS results (Handles 'list' vs 'array' automatically)
-                    raw_detections = infer_results[self.output_vstream_info.name]
-                    
+                    # 4. Distribute Results
+                    raw_detections = infer_results[self.output_v_info.name]
                     for i in range(actual_len):
-                        # Extract detection array for each frame in the batch
                         self.output_results[batch_keys[i]] = raw_detections[i]
 
-                    # Update Stats
+                    # Update FPS tracking
                     frame_count += actual_len
                     if time.time() - last_time >= 1.0:
                         self.fps = frame_count / (time.time() - last_time)
                         frame_count = 0
                         last_time = time.time()
 
-# ================= UI & DISPLAY =================
-def process_and_draw(frame, detections):
-    h, w = frame.shape[:2]
-    # Detections: [y1, x1, y2, x2, conf, cls]
-    for d in detections:
-        if d[4] > 0.5: # Confidence threshold
-            x1, y1, x2, y2 = int(d[1]*w), int(d[0]*h), int(d[3]*w), int(d[2]*h)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    return frame
+# ================= CAMERA WORKER =================
+class CameraWorker:
+    def __init__(self, ip, name, engine):
+        self.name = name
+        self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
+        self.engine = engine
+        self.latest_frame = None
+        self.latest_dets = []
+        self.lock = threading.Lock()
+        threading.Thread(target=self._run, daemon=True).start()
 
+    def _run(self):
+        cap = cv2.VideoCapture(self.url)
+        f_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(1)
+                cap.open(self.url)
+                continue
+            
+            # Resize for NPU inside the camera thread to save time
+            resized = cv2.resize(frame, (self.engine.target_shape[1], self.engine.target_shape[0]))
+            key = f"{self.name}_{f_idx}"
+            self.engine.input_queue.put((key, resized))
+
+            # Look for results
+            if key in self.engine.output_results:
+                dets = self.engine.output_results.pop(key)
+                with self.lock:
+                    self.latest_dets = dets
+            
+            with self.lock:
+                self.latest_frame = frame
+            f_idx += 1
+
+# ================= MAIN =================
 def main():
+    print("💎 Pi 5 (Gen 3) + Hailo-8L: 240 FPS Async Mode")
     engine = HailoTurboEngine(HEF_MODEL)
     engine.start()
     
-    # Simple example using one camera at max speed
-    cap = cv2.VideoCapture(0) # Change to your RTSP URL
-    print("🚀 NPU Turbo Started. Press 'q' to stop.")
-    
-    f_idx = 0
+    workers = [CameraWorker(c['ip'], c['name'], engine) for c in CAMERAS]
+
     while True:
-        ret, frame = cap.read()
-        if not ret: break
-        
-        # Prepare for NPU
-        resized = cv2.resize(frame, (640, 640))
-        frame_key = f"frame_{f_idx}"
-        engine.input_queue.put((frame_key, resized))
-        
-        # Pull results (may be slightly delayed due to batching)
-        if frame_key in engine.output_results:
-            dets = engine.output_results.pop(frame_key)
-            frame = process_and_draw(frame, dets)
-        
-        cv2.putText(frame, f"NPU FPS: {engine.fps:.2f}", (30, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        
-        cv2.imshow("Hailo 240FPS Mode", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
-        f_idx += 1
+        display_frames = []
+        for w in workers:
+            with w.lock:
+                if w.latest_frame is None: continue
+                img = w.latest_frame.copy()
+                dets = w.latest_dets
+            
+            # Draw detections
+            fh, fw = img.shape[:2]
+            for d in dets:
+                if d[4] > 0.5:
+                    x1, y1, x2, y2 = int(d[1]*fw), int(d[0]*fh), int(d[3]*fw), int(d[2]*fh)
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 127), 2)
+
+            cv2.putText(img, f"{w.name} | NPU FPS: {engine.fps:.1f}", (20, 40), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            display_frames.append(cv2.resize(img, (854, 480)))
+
+        if display_frames:
+            cv2.imshow("Hailo Turbo Dashboard", cv2.hconcat(display_frames))
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
     engine.running = False
     engine.device.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
