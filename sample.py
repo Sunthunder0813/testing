@@ -14,11 +14,11 @@ from hailo_platform import (
 HEF_MODEL = "yolov8n_person.hef"
 CONF_THRESH = 0.55  
 GREEN_TARGET = (0, 255, 127) 
+SMOOTH_FACTOR = 0.35 # 0.0 to 1.0 (Lower is smoother/slower, Higher is snappier)
 RTSP_USER = "admin"
-RTSP_PASS = "" # YOUR PASSWORD
+RTSP_PASS = "" 
 SAVE_PATH = "detections"
 
-# Create storage folder if it doesn't exist
 if not os.path.exists(SAVE_PATH):
     os.makedirs(SAVE_PATH)
 
@@ -27,75 +27,41 @@ CAMERAS = [
     {"ip": "192.168.18.113", "name": "Zone B"},
 ]
 
-# ================= SIMPLE CENTROID TRACKER =================
-class CentroidTracker:
-    def __init__(self, max_disappeared=10):
-        self.next_obj_id = 1
-        self.objects = {} # ID -> Centroid
-        self.disappeared = {} # ID -> Count
-        self.max_disappeared = max_disappeared
+# ================= BOX SMOOTHER =================
+class BoxSmoother:
+    """Prevents the green box from flickering/jumping."""
+    def __init__(self, alpha=SMOOTH_FACTOR):
+        self.alpha = alpha
+        self.smooth_box = None
 
-    def register(self, centroid):
-        self.objects[self.next_obj_id] = centroid
-        self.disappeared[self.next_obj_id] = 0
-        self.next_obj_id += 1
-        return self.next_obj_id - 1
-
-    def update(self, rects):
-        if len(rects) == 0:
-            for obj_id in list(self.disappeared.keys()):
-                self.disappeared[obj_id] += 1
-                if self.disappeared[obj_id] > self.max_disappeared:
-                    del self.objects[obj_id]
-                    del self.disappeared[obj_id]
-            return self.objects
-
-        input_centroids = np.zeros((len(rects), 2), dtype="int")
-        for (i, (x1, y1, x2, y2)) in enumerate(rects):
-            input_centroids[i] = (int((x1 + x2) / 2), int((y1 + y2) / 2))
-
-        if len(self.objects) == 0:
-            for i in range(len(input_centroids)):
-                self.register(input_centroids[i])
+    def update(self, new_box):
+        if self.smooth_box is None:
+            self.smooth_box = np.array(new_box, dtype=float)
         else:
-            obj_ids = list(self.objects.keys())
-            obj_centroids = list(self.objects.values())
-            D = np.linalg.norm(np.array(obj_centroids)[:, np.newaxis] - input_centroids, axis=2)
-            rows = D.min(axis=1).argsort()
-            cols = D.argmin(axis=1)[rows]
-
-            used_rows = set()
-            used_cols = set()
-            for (row, col) in zip(rows, cols):
-                if row in used_rows or col in used_cols: continue
-                obj_id = obj_ids[row]
-                self.objects[obj_id] = input_centroids[col]
-                self.disappeared[obj_id] = 0
-                used_rows.add(row)
-                used_cols.add(col)
-
-        return self.objects
+            # Weighted average: Smooth = (1-a)*Old + a*New
+            self.smooth_box = (1 - self.alpha) * self.smooth_box + self.alpha * np.array(new_box)
+        return self.smooth_box.astype(int)
 
 # ================= UI & DRAWING =================
 def draw_ui(img, box, obj_id, score):
-    x1, y1, x2, y2 = map(int, box)
+    x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
-    label = f"ID:{obj_id} | {int(score*100)}%"
+    label = f"LOCKED ID:{obj_id}"
     
-    # Target Brackets
+    # 1. Corner Brackets
     c_len = int(w * 0.18)
     t = 4
     cv2.rectangle(img, (x1, y1), (x2, y2), GREEN_TARGET, 1)
-    cv2.line(img, (x1, y1), (x1+c_len, y1), GREEN_TARGET, t) # TL
+    # TL
+    cv2.line(img, (x1, y1), (x1+c_len, y1), GREEN_TARGET, t)
     cv2.line(img, (x1, y1), (x1, y1+c_len), GREEN_TARGET, t)
-    cv2.line(img, (x2, y2), (x2-c_len, y2), GREEN_TARGET, t) # BR
+    # BR
+    cv2.line(img, (x2, y2), (x2-c_len, y2), GREEN_TARGET, t)
     cv2.line(img, (x2, y2), (x2, y2-c_len), GREEN_TARGET, t)
 
-    # ID Tag
-    font = cv2.FONT_HERSHEY_DUPLEX
-    (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
-    cv2.rectangle(img, (x1, y1 - th - 15), (x1 + tw + 15, y1), GREEN_TARGET, -1)
-    cv2.putText(img, label, (x1 + 7, y1 - 8), font, 0.5, (0,0,0), 1, cv2.LINE_AA)
+    # 2. Tech-Style Label
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(img, label, (x1, y1 - 10), font, 0.5, GREEN_TARGET, 1, cv2.LINE_AA)
 
 # ================= STREAM WORKER =================
 class CameraWorker:
@@ -103,15 +69,16 @@ class CameraWorker:
         self.name = name
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
         self.latest_frame = None
-        self.detections = [] # [x1, y1, x2, y2, conf]
-        self.tracker = CentroidTracker(max_disappeared=15)
-        self.logged_ids = set()
+        self.detections = [] 
+        self.smoothers = {} # ID -> BoxSmoother
         self.lock = threading.Lock()
         self.running = True
+        # Optimized for RPi: Small buffer to prevent lag
         threading.Thread(target=self._stream, daemon=True).start()
 
     def _stream(self):
         cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Force low latency
         while self.running:
             ret, frame = cap.read()
             if ret:
@@ -157,7 +124,7 @@ class AIModelManager:
 
 # ================= MAIN =================
 def main():
-    print(f"🚀 AI Guard Active. Snapshots saving to: /{SAVE_PATH}")
+    print(f"🚀 Smooth Stream Active. Smoothing Factor: {SMOOTH_FACTOR}")
     streams = [CameraWorker(c['ip'], c['name']) for c in CAMERAS]
     ai = AIModelManager(HEF_MODEL)
     threading.Thread(target=ai.run_inference, args=(streams,), daemon=True).start()
@@ -169,37 +136,30 @@ def main():
                 if s.latest_frame is None: continue
                 frame = s.latest_frame.copy()
                 dets = list(s.detections)
-            
-            # Update Tracker
-            rects = [d[:4] for d in dets]
-            tracked_objects = s.tracker.update(rects)
 
-            # Draw & Log
-            for (obj_id, centroid) in tracked_objects.items():
-                # Find matching detection for score and bounding box
-                for d in dets:
-                    # If centroid is inside this box, it's the right one
-                    if d[0] <= centroid[0] <= d[2] and d[1] <= centroid[1] <= d[3]:
-                        draw_ui(frame, d[:4], obj_id, d[4])
-                        
-                        # Snapshot Logic: Only log if this is a new ID
-                        if obj_id not in s.logged_ids:
-                            timestamp = datetime.now().strftime("%H-%M-%S")
-                            filename = f"{SAVE_PATH}/{s.name}_ID{obj_id}_{timestamp}.jpg"
-                            cv2.imwrite(filename, frame)
-                            s.logged_ids.add(obj_id)
-                        break
+            # Logic to smooth each box
+            # To keep it simple for this version, we smooth based on the index of detection
+            for i, d in enumerate(dets):
+                if i not in s.smoothers:
+                    s.smoothers[i] = BoxSmoother()
+                
+                smooth_box = s.smoothers[i].update(d[:4])
+                draw_ui(frame, smooth_box, i+1, d[4])
+
+            # Remove smoothers for objects no longer detected
+            if len(dets) < len(s.smoothers):
+                s.smoothers = {i: s.smoothers[i] for i in range(len(dets))}
 
             # HUD Display
-            count_text = f"{s.name} | PEOPLE: {len(tracked_objects)}"
-            cv2.rectangle(frame, (10, 10), (450, 60), (0,0,0), -1)
-            cv2.putText(frame, count_text, (25, 45), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+            cv2.rectangle(frame, (10, 10), (350, 60), (0,0,0), -1)
+            cv2.putText(frame, f"{s.name} | PEOPLE: {len(dets)}", (25, 45), 
+                        cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
             
             display_canvases.append(cv2.resize(frame, (854, 480)))
 
         if display_canvases:
             combined = cv2.hconcat(display_canvases) if len(display_canvases) > 1 else display_canvases[0]
-            cv2.imshow("Hailo-8L Target Monitor", combined)
+            cv2.imshow("Hailo-8L Smooth Monitor", combined)
         
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
