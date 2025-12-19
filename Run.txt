@@ -1,15 +1,2 @@
-uname -r
-sudo apt install raspberrypi-kernel-headers linux-headers-$(uname -r)
-
-sudo dpkg --purge hailort-pcie-driver
-sudo apt-get clean
-sudo apt-get update
-sudo apt-get install -f
-
-sudo dkms build -m hailort-pcie-driver -v 4.23.0
-sudo dkms install -m hailort-pcie-driver -v 4.23.0
-
-cat /var/log/hailort-pcie-driver.deb.log
-
-sudo reboot
-sudo apt install hailort-pcie-driver
+sudo apt update
+sudo apt upgrade
