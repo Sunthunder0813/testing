@@ -1,2 +1,42 @@
+# --- SYSTEM PACKAGES ---
 sudo apt update
-sudo apt upgrade
+sudo apt upgrade -y
+
+# GStreamer and plugins for RTSP/H.264
+sudo apt install -y \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav
+
+# OpenCV with GStreamer support (recommended via apt)
+sudo apt install -y python3-opencv
+
+# Python and pip
+sudo apt install -y python3-pip
+
+# Kernel headers, DKMS, build-essential (for Hailo PCIe driver)
+sudo apt install -y dkms build-essential raspberrypi-kernel-headers
+
+# --- PYTHON PACKAGES ---
+# If you need extra Python packages (e.g., numpy)
+pip3 install numpy
+
+# --- HAILO SDK ---
+# Download and install Hailo SDK and drivers as per official Hailo documentation:
+# https://docs.hailo.ai/latest/installation/index.html
+
+# Example (replace with your SDK version and file):
+# wget https://hailo.ai/downloads/hailo-ai-sdk-<version>.run
+# chmod +x hailo-ai-sdk-<version>.run
+# ./hailo-ai-sdk-<version>.run
+
+# --- HAILO PYTHON PACKAGES ---
+# After installing the SDK, install Hailo Python packages:
+pip3 install hailo_platform hailo_sdk
+
+# --- TEST GStreamer RTSP ---
+# Test RTSP stream before running Python code:
+# gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
