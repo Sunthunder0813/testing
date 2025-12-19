@@ -5,3 +5,26 @@ gstreamer1.0-plugins-good \
 gstreamer1.0-plugins-bad \
 gstreamer1.0-plugins-ugly \
 libgstreamer1.0-dev
+
+
+wget https://hailo.ai/developer-zone/software-downloads/
+
+
+sudo dpkg -i hailort_*.deb
+sudo reboot
+
+
+hailortcli fw-control identify
+
+
+pip3 install hailo_platform
+pip3 install numpy opencv-python
+
+
+import hailo_platform
+print("Hailo OK")
+
+
+mkdir ~/hailo_models
+cd ~/hailo_models
+wget https://hailo-model-zoo.s3.amazonaws.com/ModelZoo/Compiled/v2.11/yolov8n_person.hef
