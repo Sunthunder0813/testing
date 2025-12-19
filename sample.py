@@ -6,7 +6,7 @@ import time
 import signal
 import sys
 
-# 1. HAILO IMPORTS
+# 1. CRITICAL HAILO IMPORTS
 try:
     from hailo_platform import (
         HEF, VDevice, ConfigureParams, InputVStreamParams, 
@@ -16,21 +16,20 @@ except ImportError:
     print("❌ Error: hailo_platform not found. Ensure your venv is active.")
     sys.exit(1)
 
-# 2. ZERO-LATENCY OPTIMIZATIONS
+# 2. PERFORMANCE TWEAKS
 os.environ["OPENCV_VIDEOIO_PRIORITY_FFMPEG"] = "1"
-# TCP prevents the 'blinking' common with UDP packet loss
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
 
 # ================= CONFIGURATION =================
 HEF_MODEL = "yolov8n_person.hef"
-CONF_THRESH = 0.40  # Balanced for accuracy and speed
+CONF_THRESH = 0.35  # Detection sensitivity (0.0 to 1.0)
 GREEN = (0, 255, 0)
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Cam 1"},
     {"ip": "192.168.18.113", "name": "Cam 2"},
 ]
 RTSP_USER = "admin"
-RTSP_PASS = "" # ENTER PASSWORD HERE
+RTSP_PASS = "" # ENTER YOUR PASSWORD
 
 # ================= GLOBAL STATE =================
 shutdown_requested = False
@@ -39,7 +38,7 @@ def signal_handler(sig, frame):
     shutdown_requested = True
 signal.signal(signal.SIGINT, signal_handler)
 
-# ================= CAMERA WORKER =================
+# ================= CAMERA READER =================
 class StreamWorker:
     def __init__(self, url, name):
         self.name = name
@@ -51,22 +50,18 @@ class StreamWorker:
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _reader(self):
-        # We use FFMPEG for best H.264 performance
         cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
         while self.running and not shutdown_requested:
-            # .grab() flushes the network buffer to keep the feed "LIVE"
             if not cap.grab():
-                time.sleep(0.1)
-                continue
+                time.sleep(0.01); continue
             ret, frame = cap.retrieve()
             if ret:
                 with self.lock:
                     self.latest_frame = frame
         cap.release()
 
-# ================= AI WORKER =================
+# ================= HAILO AI ENGINE =================
 class AIWorker:
     def __init__(self, model_path, streams):
         self.hef = HEF(model_path)
@@ -74,9 +69,10 @@ class AIWorker:
         params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
         self.network_group = self.device.configure(self.hef, params)[0]
         
+        # Get Model Info
         self.input_name = self.hef.get_input_vstream_infos()[0].name
         self.output_name = self.hef.get_output_vstream_infos()[0].name
-        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2]
+        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2] # (640, 640)
         
         self.streams = streams
         self.running = True
@@ -94,73 +90,73 @@ class AIWorker:
                             if s.latest_frame is None: continue
                             frame_to_ai = s.latest_frame.copy()
                         
+                        # Prepare Image
                         h, w = self.target_shape
-                        resized = cv2.resize(frame_to_ai, (w, h), interpolation=cv2.INTER_LINEAR)
+                        resized = cv2.resize(frame_to_ai, (w, h))
                         
                         try:
-                            # Run inference on Hailo hardware
+                            # 3. RUN INFERENCE
                             results = infer_pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
-                            raw_data = results[self.output_name][0]
+                            raw_out = results[self.output_name][0]
                             
-                            current_dets = []
-                            if raw_data is not None:
-                                for obj in raw_data:
-                                    # obj: [ymin, xmin, ymax, xmax, confidence, class_id]
-                                    if len(obj) >= 6:
-                                        conf, cls_id = obj[4], int(obj[5])
-                                        if cls_id == 0 and conf >= CONF_THRESH:
-                                            fh, fw = frame_to_ai.shape[:2]
-                                            # Scale normalized coords to pixels
-                                            x1, y1 = int(obj[1] * fw), int(obj[0] * fh)
-                                            x2, y2 = int(obj[3] * fw), int(obj[2] * fh)
-                                            current_dets.append([x1, y1, x2, y2, conf])
+                            new_dets = []
+                            # ROBUST PARSING FOR HAILO NMS FORMAT
+                            # Standard Hailo NMS results are often padded with zeros.
+                            # We iterate through the raw array in chunks of 6.
+                            for i in range(0, len(raw_out), 6):
+                                det = raw_out[i:i+6]
+                                if len(det) < 6: break
+                                
+                                # Format: [ymin, xmin, ymax, xmax, confidence, class_id]
+                                ymin, xmin, ymax, xmax, conf, cls_id = det
+                                
+                                # If confidence is 0, we've hit the end of the detections
+                                if conf < CONF_THRESH: continue
+                                
+                                # Class 0 is Person in COCO
+                                if int(cls_id) == 0:
+                                    fh, fw = frame_to_ai.shape[:2]
+                                    # Convert normalized (0.0 - 1.0) to pixel values
+                                    px1, py1 = int(xmin * fw), int(ymin * fh)
+                                    px2, py2 = int(xmax * fw), int(ymax * fh)
+                                    new_dets.append((px1, py1, px2, py2, conf))
                             
                             with s.lock:
-                                s.detections = current_dets
-                        except: pass
+                                s.detections = new_dets
+                        except Exception as e:
+                            # Silently ignore frame drops to keep the stream smooth
+                            pass
                     time.sleep(0.001)
 
-# ================= DISPLAY LOOP =================
+# ================= DISPLAY =================
 def main():
-    print(f"🚀 Starting Dual-Cam H.264 AI on Raspberry Pi 5...")
-    
-    # Init Streams
+    print("🚀 Initializing Hailo-8L + Dual H.264 Streams...")
     streams = [StreamWorker(f"rtsp://{RTSP_USER}:{RTSP_PASS}@{c['ip']}:554/h264", c['name']) for c in CAMERAS]
-    
-    # Init AI
     ai = AIWorker(HEF_MODEL, streams)
     ai.thread.start()
 
-    print("📺 Display Active. Press 'q' to quit.")
-
+    print("📺 System Live. Press 'q' to quit.")
     while not shutdown_requested:
         canvases = []
         for s in streams:
             with s.lock:
                 frame = s.latest_frame.copy() if s.latest_frame is not None else np.zeros((480, 640, 3), np.uint8)
-                dets = s.detections.copy()
+                dets = s.detections
             
-            # DRAW GREEN FRAMES
+            # Draw detections
             for (x1, y1, x2, y2, score) in dets:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), GREEN, 2)
-                cv2.putText(frame, f"PERSON {int(score*100)}%", (x1, y1 - 10), 
+                cv2.putText(frame, f"PERSON {int(score*100)}%", (x1, y1-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, GREEN, 2)
             
-            # Add camera name and downscale for display side-by-side
-            cv2.putText(frame, s.name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             canvases.append(cv2.resize(frame, (640, 480)))
 
-        if canvases:
-            # Join the two camera feeds together horizontally
-            cv2.imshow("Hailo-8L Dual Cam", cv2.hconcat(canvases))
-        
+        cv2.imshow("Hailo-8L Dual View", cv2.hconcat(canvases))
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-    # CLEANUP
     ai.running = False
     cv2.destroyAllWindows()
     ai.device.release()
-    print("👋 Exit complete.")
 
 if __name__ == "__main__":
     main()
