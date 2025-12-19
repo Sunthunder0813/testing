@@ -1,3 +1,16 @@
+set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ sudo apt install dkms
+dkms is already the newest version (3.2.2-1~deb13u1).
+Summary:
+  Upgrading: 0, Installing: 0, Removing: 0, Not Upgrading: 9
+  1 not fully installed or removed.
+  Space needed: 0 B / 18.2 GB available
+
+Continue? [Y/n] y
+Setting up hailort-pcie-driver (4.23.0) ...
+
+WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+
+build-essential/stable,now 12.12 arm64 [installed]
 Do you wish to use DKMS? [Y/n]: y
 Failed. Exited with status 2. See /var/log/hailort-pcie-driver.deb.log
 dpkg: error processing package hailort-pcie-driver (--configure):
