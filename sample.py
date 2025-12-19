@@ -1,10 +1,12 @@
 import cv2
 import numpy as np
-from hailo_platform import HEF, VDevice, InferVStreams
+import requests
+import tempfile
+from hailo_platform import VDevice, InferVStreams
 
 # ---------------- CONFIG ----------------
 RTSP_URL = "rtsp://admin@192.168.18.2:554/stream1"
-HEF_PATH = "yolov8n_person.hef"
+MODEL_URL = "https://example.com/person_detection.tflite"  # Replace with actual URL
 INPUT_SIZE = 640
 CONF_THRESH = 0.5
 # ----------------------------------------
@@ -15,18 +17,24 @@ gst_pipeline = (
     "decodebin ! videoconvert ! appsink"
 )
 
+# Download model from internet
+response = requests.get(MODEL_URL)
+response.raise_for_status()
+with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as tmp_model:
+    tmp_model.write(response.content)
+    model_path = tmp_model.name
+
 cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
 if not cap.isOpened():
     print("❌ Cannot open RTSP stream")
     exit(1)
 
-hef = HEF(HEF_PATH)
-
 with VDevice() as device:
-    network = device.configure(hef)[0]
+    # Load TFLite model directly (API may differ based on SDK)
+    network = device.load_model(model_path)
     infer = InferVStreams(network)
 
-    print("✅ Hailo inference started")
+    print("✅ Hailo inference started (TFLite model)")
 
     while True:
         ret, frame = cap.read()
