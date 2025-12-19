@@ -1,11 +1,35 @@
 hailo-convert yolov8n.onnx --target Hailo8L --output yolov8n_person.hef
 
+set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ 
+sudo apt update
+sudo apt install -y raspberrypi-kernel-headers build-essential dkms
+Hit:1 http://deb.debian.org/debian trixie InRelease
+Hit:2 http://deb.debian.org/debian trixie-updates InRelease
+Hit:3 http://deb.debian.org/debian-security trixie-security InRelease
+Hit:4 http://archive.raspberrypi.com/debian bookworm InRelease
+Hit:5 http://archive.raspberrypi.com/debian trixie InRelease
+5 packages can be upgraded. Run 'apt list --upgradable' to see them.
+raspberrypi-kernel-headers is already the newest version (1:1.20230405-1).
+build-essential is already the newest version (12.12).
+Installing:
+  dkms
 
-set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ sudo dpkg -i hailort-pcie-driver_4.23.0_all.deb
+Suggested packages:
+  menu
+
+Summary:
+  Upgrading: 0, Installing: 1, Removing: 0, Not Upgrading: 5
+  1 not fully installed or removed.
+  Download size: 60.1 kB
+  Space needed: 241 kB / 18.2 GB available
+
+Get:1 http://deb.debian.org/debian trixie/main arm64 dkms all 3.2.2-1~deb13u1 [60.1 kB]
+Fetched 60.1 kB in 0s (1,451 kB/s)
+Selecting previously unselected package dkms.
 (Reading database ... 161940 files and directories currently installed.)
-Preparing to unpack hailort-pcie-driver_4.23.0_all.deb ...
-Could not test for SecureBoot, assuming SecureBoot is disabled on this machine.
-Unpacking hailort-pcie-driver (4.23.0) over (4.23.0) ...
+Preparing to unpack .../dkms_3.2.2-1~deb13u1_all.deb ...
+Unpacking dkms (3.2.2-1~deb13u1) ...
+Setting up dkms (3.2.2-1~deb13u1) ...
 Setting up hailort-pcie-driver (4.23.0) ...
 
 WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
@@ -13,11 +37,10 @@ WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
 build-essential/stable,now 12.12 arm64 [installed]
 Do you wish to use DKMS? [Y/n]: y
 Failed. Exited with status 2. See /var/log/hailort-pcie-driver.deb.log
-dpkg: error processing package hailort-pcie-driver (--install):
- installed hailort-pcie-driver package post-installation script subprocess returned error exit status 2
+dpkg: error processing package hailort-pcie-driver (--configure):
+ installed hailort-pcie-driver package post-installation script subprocess retur
+ned error exit status 2
+Processing triggers for man-db (2.13.1-1) ...
 Errors were encountered while processing:
  hailort-pcie-driver
-
-
-sudo apt update
-sudo apt install -y raspberrypi-kernel-headers build-essential dkms
+Error: Sub-process /usr/bin/dpkg returned an error code (1)
