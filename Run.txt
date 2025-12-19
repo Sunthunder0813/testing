@@ -1,34 +1,16 @@
 set-admin@raspberrypi:~/testing $ python3 sample.py
-[ WARN:0@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Resource not found.
+⬇️ Downloading HEF from https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.13.0/hailo8l/yolov8n.hef ...
+✅ HEF downloaded.
+✅ Hailo platform detected
+❌ Failed to load HEF or configure Hailo: InferVStreams.__init__() missing 2 required positional arguments: 'input_vstreams_params' and 'output_vstreams_params'
+Traceback (most recent call last):
+  File "/home/set-admin/testing/sample.py", line 61, in <module>
+    infer = InferVStreams(network)
+TypeError: InferVStreams.__init__() missing 2 required positional arguments: 'input_vstreams_params' and 'output_vstreams_params'
 
-(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
-Trying to dispose element pipeline0, but it is in PAUSED instead of the NULL state.
-You need to explicitly set elements to the NULL state before
-dropping the final reference, to allow them to clean up.
-This problem may also be caused by a refcounting bug in the
-application or some element.
+During handling of the above exception, another exception occurred:
 
-[ WARN:1@0.129] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
-
-(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
-Trying to dispose element videoconvert0, but it is in PLAYING instead of the NULL state.
-You need to explicitly set elements to the NULL state before
-dropping the final reference, to allow them to clean up.
-This problem may also be caused by a refcounting bug in the
-application or some element.
-
-[ WARN:1@0.129] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
-
-(python3:11370): GStreamer-CRITICAL **: 16:31:21.696: 
-Trying to dispose element appsink1, but it is in READY instead of the NULL state.
-You need to explicitly set elements to the NULL state before
-dropping the final reference, to allow them to clean up.
-This problem may also be caused by a refcounting bug in the
-application or some element.
-
-[ WARN:1@0.129] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
-❌ Cannot open RTSP stream: rtsp://admin@192.168.18.113:554/stream1
-[ WARN:0@0.131] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
-[ WARN:0@0.131] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
-[ WARN:0@0.131] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
-❌ Cannot open RTSP stream: rtsp://admin@192.168.18.2:554/stream1
+Traceback (most recent call last):
+  File "/home/set-admin/testing/sample.py", line 66, in <module>
+    from ultralytics import YOLO
+ModuleNotFoundError: No module named 'ultralytics'
