@@ -1,16 +1,8 @@
-# 1. Install GStreamer and plugins
-sudo apt update
-sudo apt install -y gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav
-
-# 2. Install OpenCV with GStreamer support (recommended via apt)
-sudo apt install -y python3-opencv
-
-# 3. (Optional) If you need a newer OpenCV, build from source with GStreamer enabled.
-
-# 4. Test RTSP stream directly
-gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
+Do you wish to use DKMS? [Y/n]: y
+Failed. Exited with status 2. See /var/log/hailort-pcie-driver.deb.log
+dpkg: error processing package hailort-pcie-driver (--configure):
+ installed hailort-pcie-driver package post-installation script subprocess retur
+ned error exit status 2
+Errors were encountered while processing:
+ hailort-pcie-driver
+Error: Sub-process /usr/bin/dpkg returned an error code (1)
