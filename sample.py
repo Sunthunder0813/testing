@@ -64,9 +64,9 @@ def main():
             hef = HEF(HEF_MODEL)
             device = VDevice()
             network = device.configure(hef)[0]
-            input_vstreams_params = network.create_input_vstream_params()
-            output_vstreams_params = network.create_output_vstream_params()
-            infer = InferVStreams(network, input_vstreams_params, output_vstreams_params)
+            # --- FIX: Use create_vstreams_params() for input/output ---
+            vstreams_params = network.create_vstreams_params()
+            infer = InferVStreams(network, vstreams_params)
             print("✅ HEF loaded and Hailo device configured.")
         except Exception as e:
             print(f"❌ Failed to load HEF or configure Hailo: {e}")
