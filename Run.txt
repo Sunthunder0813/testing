@@ -1,59 +1,11 @@
-# --- SYSTEM PACKAGES ---
-sudo apt update
-sudo apt upgrade -y
-
-# GStreamer and plugins for RTSP/H.264
-sudo apt install -y \
-    gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav
-
-# OpenCV with GStreamer support (recommended via apt)
-sudo apt install -y python3-opencv
-
-# Python and pip
-sudo apt install -y python3-pip
-
-# Kernel headers, DKMS, build-essential (for Hailo PCIe driver)
-# Use correct headers package for your OS:
-sudo apt install -y dkms build-essential linux-headers-$(uname -r)
-
-# --- PYTHON PACKAGES ---
-# Install numpy via apt to avoid pip/PEP 668 issues
-sudo apt install -y python3-numpy
-
-# --- HAILO SDK ---
-# Download and install Hailo SDK and drivers as per official Hailo documentation:
-# https://docs.hailo.ai/latest/installation/index.html
-
-# Example (replace with your SDK version and file):
-# wget https://hailo.ai/downloads/hailo-ai-sdk-<version>.run
-# chmod +x hailo-ai-sdk-<version>.run
-# ./hailo-ai-sdk-<version>.run
-
-# --- HAILO REQUIRED PACKAGES (install via SDK or individually if needed) ---
-# These are usually installed by the Hailo SDK .run installer, but you can install/update them manually:
-sudo apt install -y hailo-all
-sudo apt install -y hailo-platform
-sudo apt install -y hailo-pcie-driver
-sudo apt install -y hailo-rt
-sudo apt install -y hailo-apps
-sudo apt install -y hailo-demos
-sudo apt install -y hailo-tappas
-sudo apt install -y hailo-hailort
-sudo apt install -y hailo-hailortcli
-
-# For Python API (if not using pip/venv):
-sudo apt install -y python3-hailo-platform python3-hailo-sdk
-
-# --- TEST GStreamer RTSP ---
-# Test RTSP stream before running Python code:
-# gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
-
-# --- RUN YOUR PYTHON SCRIPT ---
-# After completing all installations and verifying RTSP streams, run your detection script:
-# (Activate your virtual environment first if you used one)
-python3 sample.py
+set-admin@raspberrypi:~/testing $ python3 sample.py
+[ WARN:0@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc1 reported: Resource not found.
+[ WARN:1@0.129] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Resource not found.
+[ WARN:1@0.129] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:0@0.129] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:1@0.129] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:0@0.129] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:1@0.129] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+[ WARN:0@0.129] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+❌ Cannot open RTSP stream: rtsp://admin@192.168.18.2:554/stream1
+❌ Cannot open RTSP stream: rtsp://admin@192.168.18.71:554/stream1
