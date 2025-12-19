@@ -17,3 +17,7 @@ dpkg: error processing package hailort-pcie-driver (--install):
  installed hailort-pcie-driver package post-installation script subprocess returned error exit status 2
 Errors were encountered while processing:
  hailort-pcie-driver
+
+
+sudo apt update
+sudo apt install -y raspberrypi-kernel-headers build-essential dkms
