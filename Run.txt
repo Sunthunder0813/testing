@@ -1,35 +1,48 @@
-Summary:
-  Upgrading: 0, Installing: 0, Removing: 0, Not Upgrading: 0
-Error: Unable to locate package raspberrypi-kernel-headers
-error: externally-managed-environment
+# --- SYSTEM PACKAGES ---
+sudo apt update
+sudo apt upgrade -y
 
-× This environment is externally managed
-╰─> To install Python packages system-wide, try apt install
-    python3-xyz, where xyz is the package you are trying to
-    install.
-    
-    If you wish to install a non-Debian-packaged Python package,
-    create a virtual environment using python3 -m venv path/to/venv.
-    Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
-    sure you have python3-full installed.
-    
-    For more information visit http://rptl.io/venv
+# GStreamer and plugins for RTSP/H.264
+sudo apt install -y \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav
 
-note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.
-hint: See PEP 668 for the detailed specification.
-error: externally-managed-environment
+# OpenCV with GStreamer support (recommended via apt)
+sudo apt install -y python3-opencv
 
-× This environment is externally managed
-╰─> To install Python packages system-wide, try apt install
-    python3-xyz, where xyz is the package you are trying to
-    install.
-    
-    If you wish to install a non-Debian-packaged Python package,
-    create a virtual environment using python3 -m venv path/to/venv.
-    Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
-    sure you have python3-full installed.
-    
-    For more information visit http://rptl.io/venv
+# Python and pip
+sudo apt install -y python3-pip
 
-note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.
-hint: See PEP 668 for the detailed specification.
+# Kernel headers, DKMS, build-essential (for Hailo PCIe driver)
+# Use correct headers package for your OS:
+sudo apt install -y dkms build-essential linux-headers-$(uname -r)
+
+# --- PYTHON PACKAGES ---
+# Install numpy via apt to avoid pip/PEP 668 issues
+sudo apt install -y python3-numpy
+
+# --- HAILO SDK ---
+# Download and install Hailo SDK and drivers as per official Hailo documentation:
+# https://docs.hailo.ai/latest/installation/index.html
+
+# Example (replace with your SDK version and file):
+# wget https://hailo.ai/downloads/hailo-ai-sdk-<version>.run
+# chmod +x hailo-ai-sdk-<version>.run
+# ./hailo-ai-sdk-<version>.run
+
+# --- HAILO PYTHON PACKAGES ---
+# If you get "externally-managed-environment" errors, use a virtual environment:
+# python3 -m venv ~/hailo-venv
+# source ~/hailo-venv/bin/activate
+# pip install hailo_platform hailo_sdk
+
+# Or, as a last resort (not recommended), use:
+# pip3 install --break-system-packages hailo_platform hailo_sdk
+
+# --- TEST GStreamer RTSP ---
+# Test RTSP stream before running Python code:
+# gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
