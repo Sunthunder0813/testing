@@ -1,44 +1,6 @@
-python object_detection.py --input dual_ip --net <your_model>
-
-(myenv) set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing/runtime/python $ ls
-common                 oriented_object_detection  speech_recognition
-instance_segmentation  paddle_ocr                 super_resolution
-lane_detection         pose_estimation
-object_detection       README.md
-(myenv) set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing/runtime/python $ cd object_detection
-(myenv) set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing/runtime/python/object_detection $ ls
-config.json                         object_detection.py  requirements.txt
-hailort-pcie-driver_4.23.0_all.deb  output.gif
-object_detection_post_process.py    README.md
-(myenv) set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing/runtime/python/object_detection $ python object_detection.py
-[HailoRT] [error] CHECK failed - Failed opening file, path: ./your_model.hef
-[HailoRT] [error] CHECK_SUCCESS failed with status=HAILO_OPEN_FILE_FAILURE(13)
-[HailoRT] [error] Failed parsing HEF file
-[HailoRT] [error] Failed creating HEF
-[HailoRT] [error] CHECK_SUCCESS failed with status=HAILO_OPEN_FILE_FAILURE(13)
-Traceback (most recent call last):
-  File "/usr/lib/python3/dist-packages/hailo_platform/pyhailort/pyhailort.py", line 345, in __init__
-    self._hef = _pyhailort.Hef.create_from_file(hef_source)
-                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
-hailo_platform.pyhailort._pyhailort.HailoRTStatusException: 13
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/home/set-admin/testing/runtime/python/object_detection/object_detection.py", line 141, in <module>
-    main()
-    ~~~~^^
-  File "/home/set-admin/testing/runtime/python/object_detection/object_detection.py", line 62, in main
-    hailo_inference = HailoInfer(net, batch_size=1)
-  File "/home/set-admin/testing/runtime/python/common/hailo_inference.py", line 35, in __init__
-    self.hef = HEF(hef_path)
-               ~~~^^^^^^^^^^
-  File "/usr/lib/python3/dist-packages/hailo_platform/pyhailort/pyhailort.py", line 343, in __init__
-    with ExceptionWrapper():
-         ~~~~~~~~~~~~~~~~^^
-  File "/usr/lib/python3/dist-packages/hailo_platform/pyhailort/pyhailort.py", line 122, in __exit__
-    self._raise_indicative_status_exception(value)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
-  File "/usr/lib/python3/dist-packages/hailo_platform/pyhailort/pyhailort.py", line 172, in _raise_indicative_status_exception
-    raise self.create_exception_from_status(error_code) from libhailort_exception
-hailo_platform.pyhailort.pyhailort.HailoRTException: libhailort failed with error: 13 (HAILO_OPEN_FILE_FAILURE)
+set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ python sample.py
+[ WARN:0@0.341] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module v4l2slh265dec0 reported: Unsupported pixel format
+[ WARN:0@0.345] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:0@0.345] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:0@0.345] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+❌ Cannot open RTSP stream
