@@ -14,10 +14,10 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 # ================= CONFIGURATION =================
 HEF_MODEL = "yolov8n_person.hef"
 CONF_THRESH = 0.45
-FRAME_SKIP = 2  # Increase skip to 2 to give the CPU more breathing room
+FRAME_SKIP = 1  # 0 = every frame, 1 = every other frame
 
 RTSP_USER = "admin"
-RTSP_PASS = "" # Put your password here
+RTSP_PASS = "" 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Cam 1"},
     {"ip": "192.168.18.113", "name": "Cam 2"},
@@ -27,6 +27,7 @@ CAMERAS = [
 shutdown_requested = False
 def signal_handler(sig, frame):
     global shutdown_requested
+    print("\n👋 Shutting down safely...")
     shutdown_requested = True
 signal.signal(signal.SIGINT, signal_handler)
 
@@ -42,6 +43,8 @@ def main():
         network_group = device.configure(hef, configure_params)[0]
         input_vparams = InputVStreamParams.make(network_group)
         output_vparams = OutputVStreamParams.make(network_group)
+        
+        # Auto-detect layer names
         input_name = hef.get_input_vstream_infos()[0].name
         output_name = hef.get_output_vstream_infos()[0].name
         target_h, target_w = hef.get_input_vstream_infos()[0].shape[:2]
@@ -59,8 +62,7 @@ def main():
             if not ret:
                 time.sleep(1)
                 continue
-            
-            # CRITICAL: Always clear the queue to prevent 'Blinking'
+            # Clear old frame to keep it 'Live'
             if not q.empty():
                 try: q.get_nowait()
                 except: pass
@@ -69,10 +71,6 @@ def main():
     for i, cam in enumerate(CAMERAS):
         url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{cam['ip']}:554/h264"
         cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-        
-        # Buffer tweaks
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
-        
         if cap.isOpened():
             print(f"✅ {cam['name']} connected")
             threading.Thread(target=reader, args=(cap, frame_queues[i], cam['name']), daemon=True).start()
@@ -97,32 +95,45 @@ def main():
                         frame = frame_queues[i].get()
                         frame_count[i] += 1
                         
-                        # Only run AI on every 3rd frame (FRAME_SKIP=2)
+                        # AI Inference
                         if frame_count[i] % (FRAME_SKIP + 1) == 0:
-                            resized = cv2.resize(frame, (target_w, target_h))
-                            results = infer_pipeline.infer({input_name: np.expand_dims(resized, axis=0)})
-                            raw_boxes = results[output_name][0]
-                            
-                            current_people = []
-                            for det in raw_boxes:
-                                ymin, xmin, ymax, xmax, score, cls_id = det
-                                if int(cls_id) == 0 and score >= CONF_THRESH:
-                                    h, w = frame.shape[:2]
-                                    current_people.append([int(xmin*w), int(ymin*h), int(xmax*w), int(ymax*h)])
-                            last_detections[i] = current_people
+                            try:
+                                resized = cv2.resize(frame, (target_w, target_h))
+                                results = infer_pipeline.infer({input_name: np.expand_dims(resized, axis=0)})
+                                raw_boxes = results[output_name][0]
+                                
+                                current_people = []
+                                # --- THE FIX: SAFETY CHECK ---
+                                if raw_boxes is not None and len(raw_boxes) > 0:
+                                    for det in raw_boxes:
+                                        # Only attempt to unpack if the row has data
+                                        if len(det) >= 6:
+                                            ymin, xmin, ymax, xmax, score, cls_id = det[:6]
+                                            if int(cls_id) == 0 and score >= CONF_THRESH:
+                                                h, w = frame.shape[:2]
+                                                current_people.append([int(xmin*w), int(ymin*h), int(xmax*w), int(ymax*h)])
+                                last_detections[i] = current_people
+                            except Exception as e:
+                                print(f"⚠️ Inference skip on {cam['name']}: {e}")
 
                         # Drawing
                         for box in last_detections[i]:
                             cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
                         
+                        cv2.putText(frame, f"{cam['name']} People: {len(last_detections[i])}", (20, 40), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        
                         display_frames.append(cv2.resize(frame, (640, 480)))
 
                     if display_frames:
-                        cv2.imshow("Detection", cv2.hconcat(display_frames))
+                        # Stack cameras side-by-side
+                        cv2.imshow("Hailo Person Detection", cv2.hconcat(display_frames))
                     
                     if cv2.waitKey(1) & 0xFF == ord('q'):
+                        shutdown_requested = True
                         break
     finally:
+        print("🧹 Cleaning up...")
         cv2.destroyAllWindows()
         device.release()
 
