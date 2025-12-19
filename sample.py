@@ -39,6 +39,7 @@ def main():
     INPUT_HEIGHT = 640
     INPUT_WIDTH = 640
     CONF_THRESH = 0.5
+    FRAME_SKIP = 1  # Number of frames to skip between inferences (0 = no skip, 1 = infer every 2nd frame)
 
     # Download HEF if not present
     if not os.path.exists(HEF_MODEL):
@@ -167,6 +168,8 @@ def main():
     fps_times = [time.time() for _ in cameras]
     fps_counts = [0 for _ in cameras]
     fps_values = [0.0 for _ in cameras]
+    last_detections = [{} for _ in cameras]  # Cache for last detections per camera
+    frame_counters = [0 for _ in cameras]    # Frame counters for skipping
 
     print("🚀 Starting person detection...")
     print("   Press 'q' to quit (or Ctrl+C)")
@@ -186,8 +189,14 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 else:
                     try:
+                        frame_counters[i] += 1
+                        run_infer = (frame_counters[i] % (FRAME_SKIP + 1) == 0)
                         start = time.time()
-                        detections = run_inference(frame)
+                        if run_infer:
+                            detections = run_inference(frame)
+                            last_detections[i] = detections
+                        else:
+                            detections = last_detections[i]
                         end = time.time()
                         fps_counts[i] += 1
                         elapsed = end - fps_times[i]
