@@ -18,8 +18,13 @@ gst_pipeline = (
 )
 
 # Download model from internet
-response = requests.get(MODEL_URL)
-response.raise_for_status()
+try:
+    response = requests.get(MODEL_URL)
+    response.raise_for_status()
+except requests.RequestException as e:
+    print(f"❌ Failed to download model: {e}")
+    exit(1)
+
 with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False, mode='wb') as tmp_model:
     tmp_model.write(response.content)
     model_path = tmp_model.name
