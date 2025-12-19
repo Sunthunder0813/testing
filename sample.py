@@ -6,164 +6,164 @@ import time
 import signal
 import sys
 
-# 1. HAILO PLATFORM IMPORTS
+# 1. CORE HAILO IMPORTS
 try:
     from hailo_platform import (
         HEF, VDevice, ConfigureParams, InputVStreamParams, 
         OutputVStreamParams, HailoStreamInterface, InferVStreams
     )
 except ImportError:
-    print("❌ Error: hailo_platform not found.")
+    print("❌ Error: hailo_platform not found. Ensure your venv is active.")
     sys.exit(1)
 
 # ================= CONFIGURATION =================
 HEF_MODEL = "yolov8n_person.hef"
 CONF_THRESH = 0.50  
 GREEN_TARGET = (0, 255, 127) 
+RTSP_USER = "admin"
+RTSP_PASS = "" # YOUR PASSWORD
 
 CAMERAS = [
     {"ip": "192.168.18.2", "name": "Front Entry"},
     {"ip": "192.168.18.113", "name": "Backyard"},
 ]
-RTSP_USER = "admin"
-RTSP_PASS = "" # YOUR PASSWORD
 
-shutdown_requested = False
-def signal_handler(sig, frame):
-    global shutdown_requested
-    shutdown_requested = True
-signal.signal(signal.SIGINT, signal_handler)
-
-# ================= UI DRAWING =================
-def draw_target(img, box, label):
+# ================= UTILS & DRAWING =================
+def draw_professional_box(img, box, score):
     x, y, x2, y2 = map(int, box)
-    w, h = x2 - x, y2 - y
+    label = f"HUMAN {int(score*100)}%"
     
+    # Draw Thick Corners
+    c_len = int((x2 - x) * 0.2)
+    # Box Shadow for contrast
+    cv2.rectangle(img, (x-1, y-1), (x2+1, y2+1), (0, 30, 0), 1)
     cv2.rectangle(img, (x, y), (x2, y2), GREEN_TARGET, 2)
-    # Corners
-    c_len = int(w * 0.2)
-    cv2.line(img, (x, y), (x + c_len, y), GREEN_TARGET, 5)
-    cv2.line(img, (x, y), (x, y + c_len), GREEN_TARGET, 5)
-    cv2.line(img, (x2, y), (x2 - c_len, y), GREEN_TARGET, 5)
-    cv2.line(img, (x2, y), (x2, y + c_len), GREEN_TARGET, 5)
-    cv2.line(img, (x, y2), (x + c_len, y2), GREEN_TARGET, 5)
-    cv2.line(img, (x, y2), (x, y2 - c_len), GREEN_TARGET, 5)
-    cv2.line(img, (x2, y2), (x2 - c_len, y2), GREEN_TARGET, 5)
-    cv2.line(img, (x2, y2), (x2, y2 - c_len), GREEN_TARGET, 5)
+    
+    # Fancy Corners
+    pts = [((x,y),(x+c_len,y)), ((x,y),(x,y+c_len)), 
+           ((x2,y),(x2-c_len,y)), ((x2,y),(x2,y+c_len)),
+           ((x,y2),(x+c_len,y2)), ((x,y2),(x,y2-c_len)),
+           ((x2,y2),(x2-c_len,y2)), ((x2,y2),(x2,y2-c_len))]
+    for p1, p2 in pts:
+        cv2.line(img, p1, p2, GREEN_TARGET, 5)
 
+    # Label Background
     font = cv2.FONT_HERSHEY_DUPLEX
     (tw, th), _ = cv2.getTextSize(label, font, 0.6, 1)
     cv2.rectangle(img, (x, y - th - 15), (x + tw + 15, y), GREEN_TARGET, -1)
     cv2.putText(img, label, (x + 7, y - 8), font, 0.6, (0,0,0), 1, cv2.LINE_AA)
 
-# ================= STREAM WORKER =================
-class StreamWorker:
+# ================= CAMERA WORKER =================
+class CameraStream:
     def __init__(self, ip, name):
         self.name = name
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
-        self.latest_frame = None
-        self.detections = [] 
+        self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        self.frame = None
+        self.detections = []
         self.lock = threading.Lock()
         self.running = True
-        threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self.update, daemon=True).start()
 
-    def _reader(self):
-        cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-        while self.running and not shutdown_requested:
-            ret, frame = cap.read()
+    def update(self):
+        while self.running:
+            ret, frame = self.cap.read()
             if ret:
-                with self.lock: self.latest_frame = frame
+                with self.lock:
+                    self.frame = frame
             else:
                 time.sleep(0.01)
-        cap.release()
 
-# ================= AI ENGINE =================
-class AIWorker:
-    def __init__(self, model_path, streams):
+# ================= HAILO ENGINE =================
+class HailoInference:
+    def __init__(self, model_path):
         self.hef = HEF(model_path)
+        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2]
         self.device = VDevice()
-        params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
-        self.network_group = self.device.configure(self.hef, params)[0]
         
+        configure_params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
+        self.network_group = self.device.configure(self.hef, configure_params)[0]
+        self.input_vstream_params = InputVStreamParams.make(self.network_group)
+        self.output_vstream_params = OutputVStreamParams.make(self.network_group)
         self.input_name = self.hef.get_input_vstream_infos()[0].name
         self.output_name = self.hef.get_output_vstream_infos()[0].name
-        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2]
-        self.streams = streams
 
-    def _run(self):
-        input_vparams = InputVStreamParams.make(self.network_group)
-        output_vparams = OutputVStreamParams.make(self.network_group)
-
+    def process(self, streams):
         with self.network_group.activate():
-            with InferVStreams(self.network_group, input_vparams, output_vparams) as infer_pipeline:
-                while not shutdown_requested:
-                    for s in self.streams:
+            with InferVStreams(self.network_group, self.input_vstream_params, self.output_vstream_params) as infer_pipeline:
+                while True:
+                    for s in streams:
                         with s.lock:
-                            if s.latest_frame is None: continue
-                            frame = s.latest_frame.copy()
+                            if s.frame is None: continue
+                            local_frame = s.frame.copy()
                         
-                        h, w = self.target_shape
-                        resized = cv2.resize(frame, (w, h))
+                        # Prepare Image
+                        fh, fw = local_frame.shape[:2]
+                        resized = cv2.resize(local_frame, (self.target_shape[1], self.target_shape[0]))
                         
-                        # Inference
-                        infer_results = infer_pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
+                        # Run Inference
+                        res = infer_pipeline.infer({self.input_name: np.expand_dims(resized, axis=0)})
                         
-                        # FIX: Extract results as a raw list first to avoid NumPy inhomogeneous error
-                        detections_list = infer_results[self.output_name][0]
+                        # SAFE PARSING: Avoid the "inhomogeneous" array error
+                        # We convert the output directly to a flat list of detections
+                        raw_output = res[self.output_name][0]
+                        final_dets = []
                         
-                        new_dets = []
-                        fh, fw = frame.shape[:2]
-
-                        # Handle the data as a list of detections
-                        # Hailo NMS results are often padded; we iterate through the valid ones
-                        for detection in detections_list:
-                            # Depending on your HEF, this might be a flat array or a structured object
-                            # We assume flat array [ymin, xmin, ymax, xmax, conf, class_id]
-                            if len(detection) >= 6:
-                                ymin, xmin, ymax, xmax, conf, cls_id = detection
+                        # Handle varied output formats (Flattened vs Structured)
+                        for i in range(len(raw_output)):
+                            det = raw_output[i]
+                            # Check if the detection is a valid array/list of at least 6 items
+                            if hasattr(det, "__len__") and len(det) >= 6:
+                                ymin, xmin, ymax, xmax, conf, cls_id = det
                                 
-                                # Strict Person-Only Check
+                                # ONLY PERSON (Class 0)
                                 if conf > CONF_THRESH and int(cls_id) == 0:
-                                    new_dets.append([
+                                    final_dets.append([
                                         int(xmin * fw), int(ymin * fh), 
-                                        int(xmax * fw), int(ymax * fh), float(conf)
+                                        int(xmax * fw), int(ymax * fh), conf
                                     ])
                         
-                        with s.lock: s.detections = new_dets
+                        with s.lock:
+                            s.detections = final_dets
                     time.sleep(0.001)
 
-# ================= MAIN =================
+# ================= MAIN LOOP =================
 def main():
-    print("💎 Hailo-8L: High-Accuracy Person Detection")
-    streams = [StreamWorker(c['ip'], c['name']) for c in CAMERAS]
-    ai = AIWorker(HEF_MODEL, streams)
+    print("💎 Initializing Hailo-8L Professional Guard...")
+    streams = [CameraStream(c['ip'], c['name']) for c in CAMERAS]
+    engine = HailoInference(HEF_MODEL)
     
-    ai_thread = threading.Thread(target=ai._run, daemon=True)
-    ai_thread.start()
+    # Run AI in Background
+    threading.Thread(target=engine.process, args=(streams,), daemon=True).start()
 
-    while not shutdown_requested:
-        canvases = []
+    while True:
+        display_frames = []
         for s in streams:
             with s.lock:
-                if s.latest_frame is None: continue
-                img = s.latest_frame.copy()
-                dets = list(s.detections)
+                if s.frame is None: continue
+                canvas = s.frame.copy()
+                current_dets = list(s.detections)
 
-            for d in dets:
-                draw_target(img, d[:4], f"PERSON {int(d[4]*100)}%")
+            for d in current_dets:
+                draw_professional_box(canvas, d[:4], d[4])
 
-            cv2.putText(img, s.name, (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-            canvases.append(cv2.resize(img, (800, 450)))
+            # Header
+            cv2.rectangle(canvas, (0,0), (300, 60), (0,0,0), -1)
+            cv2.putText(canvas, f"CAM: {s.name}", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+            display_frames.append(cv2.resize(canvas, (854, 480)))
 
-        if canvases:
-            display = cv2.hconcat(canvases) if len(canvases) > 1 else canvases[0]
-            cv2.imshow("Hailo-8L Guard", display)
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
+        if display_frames:
+            # Combine side-by-side
+            combined = cv2.hconcat(display_frames) if len(display_frames) > 1 else display_frames[0]
+            cv2.imshow("Hailo-8L Monitoring System", combined)
 
-    print("\n[!] Shutting down...")
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    print("Closing...")
+    for s in streams: s.running = False
     cv2.destroyAllWindows()
-    ai.device.release()
+    engine.device.release()
 
 if __name__ == "__main__":
     main()
