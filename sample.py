@@ -25,13 +25,12 @@ CAMERAS = [
 class Pi5Camera:
     def __init__(self, ip, name):
         self.name = name
-        # Optimization: Force TCP and disable all buffering for real-time speed
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
         self.url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{ip}:554/h264"
         
         self.frame = None
         self.detections = []
-        self.smoothed_boxes = {} # ID tracking
+        self.smoothed_boxes = {} 
         self.lock = threading.Lock()
         self.running = True
         
@@ -49,20 +48,21 @@ class Pi5Camera:
             with self.lock:
                 self.frame = frame
 
-# ================= HAILO 13-TOPS ENGINE =================
+# ================= HAILO ENGINE =================
 class HailoEngine:
     def __init__(self, model_path):
         self.device = VDevice()
         self.hef = HEF(model_path)
-        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2] # (H, W)
+        self.target_shape = self.hef.get_input_vstream_infos()[0].shape[:2] 
         
-        # PCIe Optimization for Pi 5
         params = ConfigureParams.create_from_hef(self.hef, interface=HailoStreamInterface.PCIe)
         self.network_group = self.device.configure(self.hef, params)[0]
         self.input_v = self.hef.get_input_vstream_infos()[0].name
         self.output_v = self.hef.get_output_vstream_infos()[0].name
+        self.fps = 0
 
     def infer_loop(self, cameras):
+        prev_time = 0
         with self.network_group.activate():
             with InferVStreams(self.network_group, 
                                InputVStreamParams.make(self.network_group), 
@@ -74,20 +74,24 @@ class HailoEngine:
                             raw_f = cam.frame.copy()
                         
                         h, w = raw_f.shape[:2]
-                        # Pi 5 handles resize extremely fast
                         resized = cv2.resize(raw_f, (self.target_shape[1], self.target_shape[0]))
                         
-                        # High-Speed Inference
+                        # Inference
                         res = pipeline.infer({self.input_v: np.expand_dims(resized, axis=0)})
                         raw_out = res[self.output_v][0]
                         
+                        # Calculate FPS
+                        curr_time = time.time()
+                        self.fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
+                        prev_time = curr_time
+
                         new_dets = []
-                        if hasattr(raw_out, "__len__"):
+                        # Robust Parsing to fix IndexError
+                        if raw_out is not None and len(raw_out.shape) >= 2:
                             for d in raw_out:
-                                # Class 0 is Person in YOLO
-                                if d[4] > 0.5 and int(d[5]) == 0:
-                                    # Convert normalized to pixel coordinates
-                                    new_dets.append([int(d[1]*w), int(d[0]*h), int(d[3]*w), int(d[2]*h)])
+                                if len(d) >= 6: # Ensure index 4 and 5 exist
+                                    if d[4] > 0.45 and int(d[5]) == 0:
+                                        new_dets.append([int(d[1]*w), int(d[0]*h), int(d[3]*w), int(d[2]*h)])
                         
                         with cam.lock:
                             cam.detections = new_dets
@@ -96,7 +100,8 @@ class HailoEngine:
 def smooth_ui(cam):
     with cam.lock:
         raw_boxes = cam.detections
-        # Apply Temporal Smoothing (Alpha Filter)
+        if not raw_boxes:
+            return []
         for i, target in enumerate(raw_boxes):
             if i not in cam.smoothed_boxes:
                 cam.smoothed_boxes[i] = np.array(target, dtype=float)
@@ -107,40 +112,40 @@ def smooth_ui(cam):
         return list(cam.smoothed_boxes.values())
 
 def main():
-    print("💎 Pi 5 + Hailo-8L: Industrial Surveillance Mode")
+    print("💎 Pi 5 (Gen 3) + Hailo-8L: Industrial Surveillance")
     cams = [Pi5Camera(c['ip'], c['name']) for c in CAMERAS]
-    engine = HailoEngine(HEF_MODEL)
+    engine = None
     
-    # Run Inference in background
-    threading.Thread(target=engine.infer_loop, args=(cams,), daemon=True).start()
+    try:
+        engine = HailoEngine(HEF_MODEL)
+        threading.Thread(target=engine.infer_loop, args=(cams,), daemon=True).start()
 
-    while True:
-        display_list = []
-        for cam in cams:
-            with cam.lock:
-                if cam.frame is None: continue
-                frame = cam.frame.copy()
-            
-            # Get smoothed boxes
-            boxes = smooth_ui(cam)
-            
-            # Draw HUD
-            for box in boxes:
-                x1, y1, x2, y2 = box.astype(int)
-                # Tech-style brackets
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 127), 2)
-                cv2.circle(frame, (x1+(x2-x1)//2, y1+(y2-y1)//2), 3, (0, 255, 127), -1)
+        while True:
+            display_list = []
+            for cam in cams:
+                with cam.lock:
+                    if cam.frame is None: continue
+                    frame = cam.frame.copy()
+                
+                boxes = smooth_ui(cam)
+                for box in boxes:
+                    x1, y1, x2, y2 = box.astype(int)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 127), 2)
+                
+                # Overlay Camera Name and Stats
+                cv2.putText(frame, f"{cam.name} | FPS: {engine.fps:.1f}", (20, 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 127), 2)
+                display_list.append(cv2.resize(frame, (854, 480)))
 
-            cv2.putText(frame, f"{cam.name} | PERSONS: {len(boxes)}", (20, 40), 1, 1.5, (255,255,255), 2)
-            display_list.append(cv2.resize(frame, (854, 480)))
+            if display_list:
+                combined = cv2.hconcat(display_list) if len(display_list)>1 else display_list[0]
+                cv2.imshow("Hailo-8L Pi5 Dashboard", combined)
 
-        if display_list:
-            cv2.imshow("Hailo-8L Pi5 Dashboard", cv2.hconcat(display_list) if len(display_list)>1 else display_list[0])
+            if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
-
-    cv2.destroyAllWindows()
-    engine.device.release()
+    finally:
+        cv2.destroyAllWindows()
+        if engine: engine.device.release()
 
 if __name__ == "__main__":
     main()
