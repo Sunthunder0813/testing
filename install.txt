@@ -9,6 +9,16 @@ libgstreamer1.0-dev
 
 wget https://hailo.ai/developer-zone/software-downloads/
 
+sudo apt update
+sudo apt install -y \
+libpciaccess0 \
+libglib2.0-0 \
+libstdc++6 \
+libgcc-s1 \
+libusb-1.0-0 \
+pciutils
+
+
 
 sudo dpkg -i hailort_*.deb
 sudo reboot
