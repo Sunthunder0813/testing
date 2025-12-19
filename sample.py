@@ -2,11 +2,11 @@ import cv2
 import numpy as np
 import requests
 import tempfile
-from hailo_platform import VDevice, InferVStreams
+from hailo_platform import HEF, VDevice, InferVStreams
 
 # ---------------- CONFIG ----------------
 RTSP_URL = "rtsp://admin@192.168.18.2:554/stream1"
-MODEL_URL = "https://example.com/person_detection.tflite"  # Replace with actual URL
+HEF_URL = "https://hailo.ai/model_zoo/yolov8n_person.hef"  # Replace with actual model zoo URL
 INPUT_SIZE = 640
 CONF_THRESH = 0.5
 # ----------------------------------------
@@ -17,29 +17,31 @@ gst_pipeline = (
     "decodebin ! videoconvert ! appsink"
 )
 
-# Download model from internet
+# Download HEF from internet
 try:
-    response = requests.get(MODEL_URL)
+    response = requests.get(HEF_URL)
     response.raise_for_status()
 except requests.RequestException as e:
-    print(f"❌ Failed to download model: {e}")
+    print(f"❌ Failed to download HEF: {e}")
+    print("➡️ Please check HEF_URL. The file must exist and be publicly accessible.")
     exit(1)
 
-with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False, mode='wb') as tmp_model:
-    tmp_model.write(response.content)
-    model_path = tmp_model.name
+with tempfile.NamedTemporaryFile(suffix=".hef", delete=False, mode='wb') as tmp_hef:
+    tmp_hef.write(response.content)
+    hef_path = tmp_hef.name
 
 cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
 if not cap.isOpened():
     print("❌ Cannot open RTSP stream")
     exit(1)
 
+hef = HEF(hef_path)
+
 with VDevice() as device:
-    # Load TFLite model directly (API may differ based on SDK)
-    network = device.load_model(model_path)
+    network = device.configure(hef)[0]
     infer = InferVStreams(network)
 
-    print("✅ Hailo inference started (TFLite model)")
+    print("✅ Hailo inference started")
 
     while True:
         ret, frame = cap.read()
@@ -50,7 +52,7 @@ with VDevice() as device:
         img = cv2.resize(frame, (INPUT_SIZE, INPUT_SIZE))
         img = np.expand_dims(img, axis=0)
 
-        # Inference
+        # Inference (runs on Hailo-8L)
         outputs = infer.infer(img)
 
         # ---- SIMPLE YOLO PERSON FILTER ----
