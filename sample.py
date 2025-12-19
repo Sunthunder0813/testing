@@ -38,14 +38,14 @@ def main():
     frame_queues = [Queue(maxsize=1) for _ in cameras]
 
     # -------- MODEL CONFIG --------
-    HEF_MODEL = "yolov8n_person.hef" # Standard YOLOv8n includes person class
+    HEF_MODEL = "yolov8n_person.hef" 
     INPUT_WIDTH = 640
     INPUT_HEIGHT = 640
     CONF_THRESH = 0.5
     FRAME_SKIP = 1  
 
     if not os.path.exists(HEF_MODEL):
-        print(f"❌ HEF file '{HEF_MODEL}' not found.")
+        print(f"❌ HEF file '{HEF_MODEL}' not found. Run 'cp ~/hailo-rpi5-examples/resources/yolov8n.hef ./'")
         sys.exit(1)
 
     # ================= HAILO INIT =================
@@ -60,18 +60,16 @@ def main():
         hef = HEF(HEF_MODEL)
         device = VDevice()
         
-        # Configure the network specifically for PCIe (Raspberry Pi 5)
+        # Configure for PCIe
         configure_params = ConfigureParams.create_from_hef(hef, interface=HailoStreamInterface.PCIe)
         network_group = device.configure(hef, configure_params)[0]
         
-        # Create stream parameters
         input_vstreams_params = InputVStreamParams.make(network_group)
         output_vstreams_params = OutputVStreamParams.make(network_group)
 
-        # Get the actual stream names from the HEF
         input_name = hef.get_input_vstream_infos()[0].name
         output_name = hef.get_output_vstream_infos()[0].name
-        print(f"✅ Hailo initialized. Input: {input_name}, Output: {output_name}")
+        print(f"✅ Hailo initialized. Input: {input_name}")
 
     except Exception as e:
         print(f"❌ Hailo hardware init failed: {e}")
@@ -79,8 +77,11 @@ def main():
 
     # ================= PREPROCESS =================
     def preprocess_frame(frame):
+        # Resize to 640x640
         img = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
-        return img.astype(np.uint8)
+        img = img.astype(np.uint8)
+        # Add batch dimension: (640, 640, 3) -> (1, 640, 640, 3)
+        return np.expand_dims(img, axis=0)
 
     # ================= CAMERA THREAD =================
     def camera_reader(cap, queue):
@@ -97,7 +98,6 @@ def main():
 
     # ================= OPEN CAMERAS =================
     caps = []
-    threads = []
     for cam in cameras:
         rtsp_url = f"rtsp://{username}:{password}@{cam['ip']}:554/h264"
         cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
@@ -105,9 +105,6 @@ def main():
             print(f"✅ Connected to {cam['name']}")
             t = threading.Thread(target=camera_reader, args=(cap, frame_queues[cameras.index(cam)]), daemon=True)
             t.start()
-            threads.append(t)
-        else:
-            print(f"❌ Failed to connect {cam['name']}")
         caps.append(cap)
 
     # ================= MAIN LOOP =================
@@ -116,7 +113,6 @@ def main():
     frame_count = [0] * len(cameras)
 
     try:
-        # WRAP THE LOOP IN THE CONTEXT MANAGERS
         with network_group.activate():
             with InferVStreams(network_group, input_vstreams_params, output_vstreams_params) as infer_pipeline:
                 print("🚀 Starting person detection (press Q to quit)")
@@ -134,28 +130,31 @@ def main():
                         if frame is not None:
                             frame_count[i] += 1
                             
-                            # Run Inference every X frames
+                            # Run Inference
                             if frame_count[i] % (FRAME_SKIP + 1) == 0:
                                 processed = preprocess_frame(frame)
-                                # Modern API requires dict input: {stream_name: data}
-                                infer_results = infer_pipeline.infer({input_name: processed})
                                 
-                                # Parse detections
-                                raw_detections = infer_results[output_name][0]
-                                h, w, _ = frame.shape
-                                current_dets = []
-                                
-                                for det in raw_detections:
-                                    if len(det) >= 6:
-                                        x1, y1, x2, y2, score, cls = det[:6]
-                                        if int(cls) == 0 and score >= CONF_THRESH: # 0 = Person
-                                            current_dets.append({
-                                                "bbox": (int(x1*w), int(y1*h), int(x2*w), int(y2*h)),
-                                                "conf": score
-                                            })
-                                last_detections[i] = current_dets
+                                # Perform Inference
+                                try:
+                                    infer_results = infer_pipeline.infer({input_name: processed})
+                                    raw_detections = infer_results[output_name][0]
+                                    
+                                    h, w, _ = frame.shape
+                                    current_dets = []
+                                    for det in raw_detections:
+                                        if len(det) >= 6:
+                                            # YOLOv8 format: x1, y1, x2, y2, score, cls
+                                            x1, y1, x2, y2, score, cls = det[:6]
+                                            if int(cls) == 0 and score >= CONF_THRESH:
+                                                current_dets.append({
+                                                    "bbox": (int(x1*w), int(y1*h), int(x2*w), int(y2*h)),
+                                                    "conf": score
+                                                })
+                                    last_detections[i] = current_dets
+                                except Exception as e:
+                                    print(f"Inference error on {cam['name']}: {e}")
 
-                            # Draw detections
+                            # Draw
                             for det in last_detections[i]:
                                 x1, y1, x2, y2 = det["bbox"]
                                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -163,8 +162,6 @@ def main():
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                             
                             frames_to_show.append(cv2.resize(frame, (640, 480)))
-                        else:
-                            frames_to_show.append(np.zeros((480, 640, 3), dtype=np.uint8))
 
                     if frames_to_show:
                         cv2.imshow("Person Detection", cv2.hconcat(frames_to_show))
@@ -173,9 +170,9 @@ def main():
                         break
 
     except Exception as e:
-        print(f"⚠️ Runtime Error: {e}")
+        print(f"⚠️ Global Error: {e}")
     finally:
-        print("🧹 Cleaning up...")
+        print("清理 (Cleaning up)...")
         stop_threads = True
         for cap in caps:
             cap.release()
