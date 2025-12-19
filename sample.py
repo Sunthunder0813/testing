@@ -3,7 +3,7 @@ import numpy as np
 from hailo_platform import HEF, VDevice, InferVStreams
 
 # ---------------- CONFIG ----------------
-RTSP_URL = "rtsp://user:password@192.168.18.2:554/stream1"
+RTSP_URL = "rtsp://admin@192.168.18.2:554/stream1"
 HEF_PATH = "yolov8n_person.hef"
 INPUT_SIZE = 640
 CONF_THRESH = 0.5
