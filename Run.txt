@@ -1,3 +1,2 @@
 sudo apt update
-sudo apt install -y rpi-update
-sudo rpi-update 6.1.45
+sudo apt install -y raspberrypi-kernel-headers build-essential dkms
