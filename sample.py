@@ -20,7 +20,7 @@ gst_pipeline = (
 # Download model from internet
 response = requests.get(MODEL_URL)
 response.raise_for_status()
-with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as tmp_model:
+with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False, mode='wb') as tmp_model:
     tmp_model.write(response.content)
     model_path = tmp_model.name
 
