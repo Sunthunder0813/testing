@@ -1,3 +1,11 @@
-sudo apt update
-sudo apt install raspberrypi-kernel-headers build-essential dkms
-sudo dpkg -i hailort-pcie-driver_4.23.0_all.deb
+set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ python sample.py
+[ WARN:0@0.364] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module udpsrc0 reported: Internal data stream error.
+[ WARN:0@0.369] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:0@0.369] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:0@0.369] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+❌ Cannot open RTSP stream: rtsp://user:password@192.168.18.2:554/stream1
+[ WARN:1@3.214] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Could not open resource for reading and writing.
+[ WARN:1@3.216] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
+[ WARN:1@3.216] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
+[ WARN:1@3.216] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
+❌ Cannot open RTSP stream: rtsp://user:password@192.168.18.71:554/stream1
