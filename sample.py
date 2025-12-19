@@ -1,31 +1,17 @@
 import cv2
 import numpy as np
-import requests
-import tempfile
 from hailo_platform import HEF, VDevice, InferVStreams
 
 # ---------------- CONFIG ----------------
 RTSP_URL = "rtsp://admin@192.168.18.2:554/stream1"
-ONNX_URL = "https://github.com/ultralytics/yolov8/releases/download/v8.0.0/yolov8n.onnx"
+LOCAL_ONNX_PATH = "/home/pi/hailo_models/yolov8n.onnx"  # <-- your local ONNX
+HEF_PATH = "/home/pi/hailo_models/yolov8n_person.hef"   # <-- after converting to HEF
 INPUT_SIZE = 640
 CONF_THRESH = 0.5
 # ----------------------------------------
 
-# ---------------- HELPER: download ONNX ----------------
-try:
-    response = requests.get(ONNX_URL)
-    response.raise_for_status()
-except requests.RequestException as e:
-    print(f"❌ Failed to download ONNX: {e}")
-    exit(1)
-
-with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False, mode='wb') as tmp_onnx:
-    tmp_onnx.write(response.content)
-    onnx_path = tmp_onnx.name
-
-print(f"✅ ONNX downloaded to {onnx_path}")
-print("➡️ Please convert to HEF using Hailo Convert CLI before running this script:")
-print(f"hailo-convert {onnx_path} --target Hailo8L --output yolov8n_person.hef")
+print(f"➡️ Using local ONNX: {LOCAL_ONNX_PATH}")
+print(f"➡️ Make sure HEF exists: {HEF_PATH}")
 
 # ---------------- GStreamer RTSP pipeline ----------------
 gst_pipeline = (
@@ -39,7 +25,6 @@ if not cap.isOpened():
     exit(1)
 
 # ---------------- LOAD HEF ----------------
-HEF_PATH = "yolov8n_person.hef"  # After converting ONNX to HEF with Hailo
 hef = HEF(HEF_PATH)
 
 with VDevice() as device:
@@ -62,7 +47,6 @@ with VDevice() as device:
 
         # ---------------- SIMPLE PERSON FILTER ----------------
         # Adjust based on your HEF output format
-        # Here assuming outputs[0] contains [x1, y1, x2, y2, score, class]
         detections = outputs[list(outputs.keys())[0]][0]
 
         for det in detections:
