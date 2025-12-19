@@ -56,8 +56,8 @@ def main():
         HAILO_AVAILABLE = True
         print("✅ Hailo platform detected")
     except ImportError:
-        print("⚠️ Hailo platform library not found. Falling back to CPU inference.")
-        from ultralytics import YOLO
+        print("❌ Hailo platform library not found. This script requires Hailo. Exiting.")
+        sys.exit(1)
 
     if HAILO_AVAILABLE:
         try:
@@ -70,19 +70,7 @@ def main():
             print("✅ HEF loaded and Hailo device configured.")
         except Exception as e:
             print(f"❌ Failed to load HEF or configure Hailo: {e}")
-            HAILO_AVAILABLE = False
-            try:
-                from ultralytics import YOLO
-                model = YOLO("yolov8n.pt")
-            except ImportError:
-                print("❌ 'ultralytics' not installed. Run: pip install ultralytics")
-                sys.exit(1)
-    else:
-        try:
-            from ultralytics import YOLO
-            model = YOLO("yolov8n.pt")
-        except ImportError:
-            print("❌ 'ultralytics' not installed. Run: pip install ultralytics")
+            print("   This script requires a working Hailo device. Exiting.")
             sys.exit(1)
 
     def preprocess_frame(frame):
@@ -106,22 +94,8 @@ def main():
                 results.append({'bbox': (x1, y1, x2, y2), 'conf': score, 'class_id': int(cls)})
         return results
 
-    def run_cpu_inference(frame):
-        results = model(frame, verbose=False)
-        detections = []
-        for result in results:
-            for box in result.boxes:
-                cls_id = int(box.cls[0])
-                if cls_id == 0:  # person
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    detections.append({'bbox': (x1, y1, x2, y2), 'conf': float(box.conf[0]), 'class_id': cls_id})
-        return detections
-
     def run_inference(frame):
-        if HAILO_AVAILABLE:
-            return run_hailo_inference(frame)
-        else:
-            return run_cpu_inference(frame)
+        return run_hailo_inference(frame)
 
     def camera_reader(cap, queue, cam_name):
         global stop_threads, shutdown_requested
