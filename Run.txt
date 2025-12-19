@@ -1,11 +1,16 @@
-set-admin@ILLEGAL-PARKING-DETECTION-SYSTEM:~/testing $ python sample.py
-[ WARN:0@0.364] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module udpsrc0 reported: Internal data stream error.
-[ WARN:0@0.369] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
-[ WARN:0@0.369] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
-[ WARN:0@0.369] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
-❌ Cannot open RTSP stream: rtsp://user:password@192.168.18.2:554/stream1
-[ WARN:1@3.214] global cap_gstreamer.cpp:2839 handleMessage OpenCV | GStreamer warning: Embedded video playback halted; module rtspsrc0 reported: Could not open resource for reading and writing.
-[ WARN:1@3.216] global cap_gstreamer.cpp:1698 open OpenCV | GStreamer warning: unable to start pipeline
-[ WARN:1@3.216] global cap_gstreamer.cpp:1173 isPipelinePlaying OpenCV | GStreamer warning: GStreamer: pipeline have not been created
-[ WARN:1@3.216] global cap.cpp:204 open VIDEOIO(GSTREAMER): backend is generally available but can't be used to capture by name
-❌ Cannot open RTSP stream: rtsp://user:password@192.168.18.71:554/stream1
+# 1. Install GStreamer and plugins
+sudo apt update
+sudo apt install -y gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav
+
+# 2. Install OpenCV with GStreamer support (recommended via apt)
+sudo apt install -y python3-opencv
+
+# 3. (Optional) If you need a newer OpenCV, build from source with GStreamer enabled.
+
+# 4. Test RTSP stream directly
+gst-launch-1.0 rtspsrc location=rtsp://user:password@192.168.18.2:554/stream1 latency=0 ! decodebin ! autovideosink
