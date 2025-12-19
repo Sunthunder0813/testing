@@ -11,19 +11,19 @@ import time
 import signal
 import sys
 
-# ---------------- SIGNAL HANDLING ----------------
+# ================= SIGNAL HANDLING =================
 shutdown_requested = False
 stop_threads = False
 
 def signal_handler(sig, frame):
     global shutdown_requested
-    print("\n⚠️ Shutdown requested...")
+    print("\n⚠️ Shutdown requested")
     shutdown_requested = True
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-# ---------------- MAIN ----------------
+# ================= MAIN =================
 def main():
     global shutdown_requested, stop_threads
 
@@ -42,13 +42,13 @@ def main():
     INPUT_WIDTH = 640
     INPUT_HEIGHT = 640
     CONF_THRESH = 0.5
-    FRAME_SKIP = 1  # 0 = infer every frame, 1 = every 2nd frame
+    FRAME_SKIP = 1  # 0 = every frame, 1 = every 2nd frame
 
     if not os.path.exists(HEF_MODEL):
         print(f"❌ HEF file '{HEF_MODEL}' not found")
         sys.exit(1)
 
-    # -------- HAILO SETUP --------
+    # ================= HAILO INIT (LEGACY SAFE) =================
     try:
         from hailo_platform import HEF, VDevice, InferVStreams
         print("✅ Hailo platform detected")
@@ -61,42 +61,33 @@ def main():
         device = VDevice()
         network = device.configure(hef)[0]
 
-        # 🔥 SDK-VERSION SAFE INIT
-        try:
-            vstreams_params = network.create_vstreams_params()
-            infer = InferVStreams(network, vstreams_params)
-            print("✅ Using unified vstreams params (new SDK)")
-        except AttributeError:
-            input_params = network.create_input_vstream_params()
-            output_params = network.create_output_vstream_params()
-            infer = InferVStreams(network, input_params, output_params)
-            print("✅ Using input/output vstreams params (old SDK)")
-
-        input_name = infer.get_input_names()[0]
+        # 🔥 LEGACY SDK SUPPORT
+        infer = InferVStreams(network)
+        print("✅ Using legacy InferVStreams(network)")
 
     except Exception as e:
         print(f"❌ Hailo init failed: {e}")
         sys.exit(1)
 
-    # -------- PREPROCESS --------
+    # ================= PREPROCESS =================
     def preprocess_frame(frame):
         img = cv2.resize(frame, (INPUT_WIDTH, INPUT_HEIGHT))
         img = img.astype(np.uint8)
         img = np.expand_dims(img, axis=0)
         return img
 
-    # -------- INFERENCE --------
+    # ================= INFERENCE =================
     def run_hailo_inference(frame):
         img = preprocess_frame(frame)
 
-        # ✅ CORRECT HAILO INPUT FORMAT
-        outputs = infer.infer({input_name: img})
+        # LEGACY SDK OUTPUT
+        outputs = infer.infer(img)
+        detections_raw = outputs[0]
 
-        output_tensor = list(outputs.values())[0][0]
         h, w, _ = frame.shape
         detections = []
 
-        for det in output_tensor:
+        for det in detections_raw:
             x1, y1, x2, y2, score, cls = det
             if int(cls) == 0 and score >= CONF_THRESH:
                 detections.append({
@@ -110,7 +101,7 @@ def main():
                 })
         return detections
 
-    # -------- CAMERA THREAD --------
+    # ================= CAMERA THREAD =================
     def camera_reader(cap, queue, name):
         global stop_threads, shutdown_requested
         while not stop_threads and not shutdown_requested:
@@ -122,13 +113,13 @@ def main():
             else:
                 time.sleep(0.01)
 
-    # -------- OPEN CAMERAS --------
+    # ================= OPEN CAMERAS =================
     caps = []
     threads = []
 
     for i, cam in enumerate(cameras):
-        rtsp = f"rtsp://{username}:{password}@{cam['ip']}:554/h264"
-        cap = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
+        rtsp_url = f"rtsp://{username}:{password}@{cam['ip']}:554/h264"
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         cap.set(cv2.CAP_PROP_FPS, 15)
 
@@ -146,13 +137,13 @@ def main():
 
         caps.append(cap)
 
-    # -------- DISPLAY --------
+    # ================= DISPLAY =================
     try:
         cv2.namedWindow("Person Detection", cv2.WINDOW_NORMAL)
         display = True
     except:
         display = False
-        print("⚠️ Headless mode")
+        print("⚠️ Headless mode (no display)")
 
     last_frames = [None] * len(cameras)
     last_detections = [[] for _ in cameras]
@@ -161,9 +152,9 @@ def main():
     fps_val = [0] * len(cameras)
     fps_count = [0] * len(cameras)
 
-    print("🚀 Starting detection (press Q to quit)")
+    print("🚀 Starting person detection (press Q to quit)")
 
-    # -------- MAIN LOOP --------
+    # ================= MAIN LOOP =================
     try:
         while not shutdown_requested:
             frames = []
@@ -216,7 +207,7 @@ def main():
     except KeyboardInterrupt:
         pass
 
-    # -------- CLEANUP --------
+    # ================= CLEANUP =================
     print("🧹 Cleaning up...")
     stop_threads = True
     shutdown_requested = True
@@ -228,6 +219,6 @@ def main():
     cv2.destroyAllWindows()
     print("👋 Exit complete")
 
-# ---------------- RUN ----------------
+# ================= RUN =================
 if __name__ == "__main__":
     main()
