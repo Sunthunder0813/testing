@@ -27,7 +27,7 @@ def main():
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("Camera Error: cannot open camera")
+        print("Camera Error: cannot open camera. Please check if your camera is connected and the index (0) is correct.")
         ser.close()
         return
 
