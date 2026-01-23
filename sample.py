@@ -4,7 +4,7 @@ import time
 from ultralytics import YOLO
 
 # Set SERIAL_PORT to your Bluetooth COM port (e.g., "COM3" on Windows)
-SERIAL_PORT = "COM9"  # <- Update this to match your system's Bluetooth port
+SERIAL_PORT = "/dev/rfcomm0"
 BAUD = 115200
 
 # Use a real hand-detection model here:
