@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import serial
 import time
-from hailo_platform import (PcieDevice, HEF, ConfigureNames, HailoStreamInterface, 
+from hailo_platform import (PcieDevice, HEF, ConfigureParams, HailoStreamInterface, 
                             InferVStreams, InputVStreamParams, OutputVStreamParams, FormatType)
 
 # --- Bluetooth Setup ---
@@ -25,7 +25,7 @@ def run_ai_collector():
     hef = HEF(HEF_PATH)
 
     # Configure the network
-    configure_params = ConfigureNames.get_default_config_params(hef, HailoStreamInterface.PCIe)
+    configure_params = ConfigureParams.get_default_config_params(hef, HailoStreamInterface.PCIe)
     network_group = target.configure(hef, configure_params)[0]
     network_group_params = network_group.create_params()
 
