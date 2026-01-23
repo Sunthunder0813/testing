@@ -4,3 +4,6 @@ nano ~/setup_hailo.sh
 chmod +x ~/setup_hailo.sh
 
 ./setup_hailo.sh
+
+
+100.93.98.117
