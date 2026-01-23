@@ -1,57 +1,6 @@
-# --- SYSTEM PACKAGES ---
-sudo apt update
-sudo apt upgrade -y
+nano ~/setup_hailo.sh
+# Paste the script, then press Ctrl+X, Y, Enter
 
-# GStreamer and plugins for RTSP/H.264
-sudo apt install -y \
-    gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav
+chmod +x ~/setup_hailo.sh
 
-# OpenCV with FFMPEG and GStreamer support
-sudo apt install -y python3-opencv ffmpeg
-
-# Python and pip
-sudo apt install -y python3-pip
-
-# Kernel headers, DKMS, build-essential (for Hailo PCIe driver)
-sudo apt install -y dkms build-essential linux-headers-$(uname -r)
-
-# --- PYTHON VIRTUAL ENVIRONMENT (recommended) ---
-sudo apt install -y python3-venv
-python3 -m venv ~/hailo-venv
-source ~/hailo-venv/bin/activate
-
-# Upgrade pip inside the venv
-pip install --upgrade pip
-
-# Install required Python packages inside the venv
-pip install numpy ultralytics hailo_platform opencv-python
-
-# --- HAILO SDK & PLATFORM ---
-sudo apt install -y hailo-all
-
-# --- HAILO PYTHON PACKAGES ---
-# If you use a virtual environment:
-# python3 -m venv ~/hailo-venv
-# source ~/hailo-venv/bin/activate
-# pip install hailo_platform
-
-# --- ULTRALYTICS (CPU fallback) ---
-pip3 install ultralytics
-
-# --- TEST RTSP STREAM ---
-# Test RTSP stream before running Python code:
-# gst-launch-1.0 rtspsrc location=rtsp://admin@192.168.18.2:554/h264 latency=0 ! decodebin ! autovideosink
-
-
-
-
-
-
-(hailo-venv) set-admin@raspberrypi:~/testing $ python sample.py
-✅ Hailo platform detected
-❌ Hailo init failed: 'ConfiguredNetwork' object has no attribute 'create_input_vstream_params'
+./setup_hailo.sh
