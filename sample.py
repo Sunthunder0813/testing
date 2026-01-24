@@ -1,6 +1,7 @@
 import cv2
 import serial
 import time
+import numpy as np
 
 # Set SERIAL_PORT to your Bluetooth COM port (e.g., "COM3" on Windows)
 SERIAL_PORT = "/dev/rfcomm0"
@@ -16,21 +17,14 @@ def main():
         print(f"Bluetooth Error: {e}")
         return
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Camera Error: cannot open camera. Please check if your camera is connected and the index (0) is correct.")
-        ser.close()
-        return
+    print("Press UP or DOWN arrow key (press q to quit)")
 
-    print("Vision Active: Press UP or DOWN arrow key (press q to quit)")
+    # Create a blank window for key capture
+    window_name = "Arrow Key Control"
+    blank_img = 255 * np.ones((200, 400, 3), dtype=np.uint8)
+    cv2.imshow(window_name, blank_img)
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        annotated = frame.copy()
-        cv2.imshow("Arrow Key Control", annotated)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord('q'):
@@ -38,19 +32,20 @@ def main():
         elif key == 82:  # Up arrow key
             ser.write(b'u')
             ser.write(b'UP SENT\n')
-            cv2.putText(annotated, "UP SENT", (10, 40),
+            img = blank_img.copy()
+            cv2.putText(img, "UP SENT", (10, 100),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow("Arrow Key Control", annotated)
-            cv2.waitKey(300)  # Briefly show feedback
+            cv2.imshow(window_name, img)
+            cv2.waitKey(300)
         elif key == 84:  # Down arrow key
             ser.write(b'd')
             ser.write(b'DOWN SENT\n')
-            cv2.putText(annotated, "DOWN SENT", (10, 40),
+            img = blank_img.copy()
+            cv2.putText(img, "DOWN SENT", (10, 100),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.imshow("Arrow Key Control", annotated)
-            cv2.waitKey(300)  # Briefly show feedback
+            cv2.imshow(window_name, img)
+            cv2.waitKey(300)
 
-    cap.release()
     ser.close()
     cv2.destroyAllWindows()
 
